@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 // Dynamic API Base URL for local development vs live Render production
 const API_BASE = window.location.hostname === 'localhost' 
   ? 'http://localhost:5000' 
-  : 'https://unilnk-backend.onrender.com';
+  : 'https://unilnk-backend-api.onrender.com';
 
 const CATEGORIES = [
   'All',

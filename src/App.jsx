@@ -1,5 +1,10 @@
 import React, { useState, useEffect } from 'react';
 
+// Dynamic API Base URL for local development vs live Render production
+const API_BASE = window.location.hostname === 'localhost' 
+  ? 'http://localhost:5000' 
+  : 'https://unilnk-backend.onrender.com';
+
 const CATEGORIES = [
   'All',
   'Textbooks & Books',
@@ -256,7 +261,7 @@ function App() {
 
   const fetchListings = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/listings');
+      const res = await fetch(`${API_BASE}/api/listings`);
       const data = await res.json();
       if (data.success) setListings(data.data);
     } catch (err) {
@@ -268,7 +273,7 @@ function App() {
     const userId = currentUser?.id || currentUser?.user?.id;
     if (!userId) return;
     try {
-      const res = await fetch(`http://localhost:5000/api/users/${userId}/dashboard`);
+      const res = await fetch(`${API_BASE}/api/users/${userId}/dashboard`);
       const data = await res.json();
       if (data.success) {
         setDashboardData({ purchases: data.purchases, sales: data.sales });
@@ -282,7 +287,7 @@ function App() {
     const userId = currentUser?.id || currentUser?.user?.id;
     if (!userId) return;
     try {
-      const res = await fetch(`http://localhost:5000/api/users/${userId}/listings`);
+      const res = await fetch(`${API_BASE}/api/users/${userId}/listings`);
       const data = await res.json();
       if (data.success) setSellerListings(data.listings);
     } catch (err) {
@@ -292,7 +297,7 @@ function App() {
 
   const fetchMessages = async (txnId) => {
     try {
-      const res = await fetch(`http://localhost:5000/api/transactions/${txnId}/messages`);
+      const res = await fetch(`${API_BASE}/api/transactions/${txnId}/messages`);
       const data = await res.json();
       if (data.success) setChatMessages(data.messages);
     } catch (err) {
@@ -307,7 +312,7 @@ function App() {
   const handleDeleteListing = async (listingId) => {
     if (!window.confirm('Are you sure you want to delete this listing?')) return;
     try {
-      const res = await fetch(`http://localhost:5000/api/listings/${listingId}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/api/listings/${listingId}`, { method: 'DELETE' });
       const data = await res.json();
       if (data.success) {
         showToast('Listing removed successfully.', 'info');
@@ -321,7 +326,7 @@ function App() {
 
   const handleUpdateListing = async (listingId) => {
     try {
-      const res = await fetch(`http://localhost:5000/api/listings/${listingId}`, {
+      const res = await fetch(`${API_BASE}/api/listings/${listingId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editForm),
@@ -357,7 +362,7 @@ function App() {
     const userId = currentUser?.id || currentUser?.user?.id;
 
     try {
-      const res = await fetch(`http://localhost:5000/api/transactions/${activeTxnId}/messages`, {
+      const res = await fetch(`${API_BASE}/api/transactions/${activeTxnId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sender_id: userId, message_text: newMessageText }),
@@ -376,7 +381,7 @@ function App() {
     e.preventDefault();
     const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
     try {
-      const res = await fetch(`http://localhost:5000${endpoint}`, {
+      const res = await fetch(`${API_BASE}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(authData),
@@ -423,7 +428,7 @@ function App() {
     }
 
     try {
-      const res = await fetch('http://localhost:5000/api/listings', {
+      const res = await fetch(`${API_BASE}/api/listings`, {
         method: 'POST',
         body: formData,
       });
@@ -454,7 +459,7 @@ function App() {
     const userId = currentUser.id || currentUser.user?.id;
 
     try {
-      const res = await fetch('http://localhost:5000/api/transactions/reserve', {
+      const res = await fetch(`${API_BASE}/api/transactions/reserve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -481,7 +486,7 @@ function App() {
   const handleHandshake = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetch('http://localhost:5000/api/transactions/handshake', {
+      const res = await fetch(`${API_BASE}/api/transactions/handshake`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transaction_id: handshakeTxnId }),

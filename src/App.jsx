@@ -30,11 +30,16 @@ const THEME = {
   unilusDarkGreen: '#003318',
   emerald: '#10B981',
   goldAccent: '#F59E0B',
+  goldLight: '#FCD34D',
   bgDark: '#0B1320',
   cardBg: 'rgba(21, 34, 56, 0.75)',
   borderGreen: 'rgba(0, 102, 51, 0.6)',
   textMain: '#F8FAFC',
   textMuted: '#94A3B8',
+  textLight: '#E2E8F0',
+  warning: '#F59E0B',
+  success: '#10B981',
+  danger: '#EF4444',
 };
 
 // Toast Hook
@@ -89,7 +94,7 @@ const ListingCard = ({ item, onReserve, onOpenChat, currentUser }) => {
 
   const handleChatClick = () => {
     if (!currentUser) {
-      onOpenChat(null, null, null, true); // Trigger login
+      onOpenChat(null, null, null, true);
       return;
     }
     onOpenChat(item.seller_id, item.id, item.title);
@@ -202,7 +207,6 @@ const ListingCard = ({ item, onReserve, onOpenChat, currentUser }) => {
             Category: <strong style={{ color: '#E2E8F0' }}>{item.category}</strong>
           </p>
 
-          {/* SELLER INFO - NEW */}
           <p style={{ margin: '0 0 5px 0', color: THEME.textMuted, fontSize: '12px' }}>
             👤 Seller: <strong style={{ color: '#E2E8F0' }}>{item.seller_name || 'UNILUS Student'}</strong>
           </p>
@@ -213,7 +217,6 @@ const ListingCard = ({ item, onReserve, onOpenChat, currentUser }) => {
         </div>
       </div>
 
-      {/* ACTION BUTTONS - NEW LAYOUT WITH CHAT BUTTON */}
       <div style={{ padding: '0 15px 15px 15px', display: 'flex', gap: '10px' }}>
         <button
           onClick={handleReserveClick}
@@ -239,7 +242,6 @@ const ListingCard = ({ item, onReserve, onOpenChat, currentUser }) => {
           {isReserving ? 'Processing...' : item.quantity > 0 ? 'Reserve Item' : 'Out of Stock'}
         </button>
         
-        {/* CHAT BUTTON - NEW */}
         <button
           onClick={handleChatClick}
           disabled={!currentUser}
@@ -352,7 +354,6 @@ const ChatModal = ({ isOpen, onClose, sellerId, listingId, listingTitle, current
         overflow: 'hidden',
       }} onClick={(e) => e.stopPropagation()}>
         
-        {/* Chat Header */}
         <div style={{
           padding: '20px 24px',
           borderBottom: `1px solid ${THEME.borderGreen}`,
@@ -375,7 +376,6 @@ const ChatModal = ({ isOpen, onClose, sellerId, listingId, listingTitle, current
           }}>×</button>
         </div>
 
-        {/* Messages */}
         <div style={{
           flex: 1,
           overflowY: 'auto',
@@ -430,7 +430,6 @@ const ChatModal = ({ isOpen, onClose, sellerId, listingId, listingTitle, current
           )}
         </div>
 
-        {/* Input */}
         <form onSubmit={sendMessage} style={{
           padding: '16px 24px',
           borderTop: `1px solid ${THEME.borderGreen}`,
@@ -546,7 +545,7 @@ const AuthModal = ({ isOpen, onClose, onAuthSuccess }) => {
           right: '16px',
           background: 'none',
           border: 'none',
-          color: THEME.textMuted',
+          color: THEME.textMuted,
           fontSize: '28px',
           cursor: 'pointer',
         }}>×</button>
@@ -678,7 +677,6 @@ function App() {
   const [handshakeTxnId, setHandshakeTxnId] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Fetch listings
   const fetchListings = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/api/listings`);
@@ -799,7 +797,6 @@ function App() {
     });
   }, [listings, searchTerm, selectedCategory, selectedCampus]);
 
-  // Open chat with seller
   const handleOpenChat = (sellerId, listingId, listingTitle, requireLogin = false) => {
     if (requireLogin || !currentUser) {
       setIsAuthModalOpen(true);
@@ -981,7 +978,6 @@ function App() {
   return (
     <div style={{ backgroundColor: THEME.bgDark, minHeight: '100vh', color: THEME.textMain, padding: '24px 20px 20px 20px', fontFamily: "'Inter', system-ui, sans-serif" }}>
       
-      {/* Top Brand Accent Bar */}
       <div style={{
         position: 'fixed',
         top: 0,
@@ -994,7 +990,6 @@ function App() {
 
       <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
         
-        {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: `2px solid ${THEME.unilusGreen}`, paddingBottom: '15px', marginBottom: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
             <div style={{
@@ -1030,7 +1025,6 @@ function App() {
 
         <Toast toast={toast} />
 
-        {/* Auth / User Session */}
         {!currentUser ? (
           <div style={{ display: 'flex', gap: '12px', alignItems: 'center', justifyContent: 'center', padding: '16px', background: THEME.cardBg, backdropFilter: 'blur(12px)', border: `1px solid ${THEME.borderGreen}`, borderRadius: '12px', marginBottom: '20px' }}>
             <button onClick={() => setIsAuthModalOpen(true)} style={{ padding: '10px 24px', background: THEME.unilusGreen, color: '#fff', border: `1px solid ${THEME.emerald}`, borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}>
@@ -1048,7 +1042,6 @@ function App() {
           </div>
         )}
 
-        {/* Navigation Tabs */}
         <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
           <TabButton tab="browse" label="Browse Marketplace" icon="🛍️" />
           {currentUser && (
@@ -1060,14 +1053,12 @@ function App() {
           )}
         </div>
 
-        {/* Auth Modal */}
         <AuthModal
           isOpen={isAuthModalOpen}
           onClose={() => setIsAuthModalOpen(false)}
           onAuthSuccess={handleAuthSuccess}
         />
 
-        {/* Chat Modal */}
         <ChatModal
           isOpen={chatModal.isOpen}
           onClose={handleCloseChat}
@@ -1078,7 +1069,6 @@ function App() {
           API_BASE={API_BASE}
         />
 
-        {/* Tab Content */}
         {activeTab === 'browse' && (
           <div>
             <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>

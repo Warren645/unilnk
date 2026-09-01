@@ -4,7 +4,7 @@ import './App.css';
 // Dynamic API Base URL
 const API_BASE = window.location.hostname === 'localhost' 
   ? 'http://localhost:5000' 
-  : 'https://your-backend-url.onrender.com'; // CHANGE THIS!
+  : 'https://unilnk-backend-api.onrender.com'; // CHANGE THIS!
 
 const CATEGORIES = [
   'All',
@@ -20,7 +20,7 @@ const CATEGORIES = [
 
 const CAMPUSES = [
   'Silverest Main Campus',
-  'Pioneer Campus',
+  'Leopards Hill Campus',
   'Mass Media Campus',
 ];
 

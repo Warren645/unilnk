@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import './App.css';
 
-// Dynamic API Base URL for local development vs live Render production
+// Dynamic API Base URL
 const API_BASE = window.location.hostname === 'localhost' 
   ? 'http://localhost:5000' 
   : 'https://unilnk-backend-api.onrender.com';
@@ -23,192 +24,290 @@ const CAMPUSES = [
   'Mass Media Campus',
 ];
 
-// UNILUS Theme Color Constants
+// Enhanced Theme
 const THEME = {
   unilusGreen: '#004D25',
   unilusDarkGreen: '#003318',
+  unilusLightGreen: '#1a7a4a',
   emerald: '#10B981',
   emeraldHover: '#059669',
   goldAccent: '#F59E0B',
+  goldLight: '#FCD34D',
   bgDark: '#0B1320',
-  cardBg: 'rgba(21, 34, 56, 0.75)',
-  borderGreen: 'rgba(0, 102, 51, 0.6)',
+  bgCard: 'rgba(21, 34, 56, 0.85)',
+  borderGreen: 'rgba(0, 102, 51, 0.4)',
   textMain: '#F8FAFC',
   textMuted: '#94A3B8',
+  textLight: '#E2E8F0',
+  danger: '#EF4444',
+  warning: '#F59E0B',
+  success: '#10B981',
 };
 
-function ListingCard({ item, onReserve }) {
-  let images = [];
-  try {
-    if (item.image_url) {
-      images = typeof item.image_url === 'string' && item.image_url.startsWith('[')
-        ? JSON.parse(item.image_url)
-        : [item.image_url];
-    }
-  } catch {
-    images = [item.image_url];
-  }
+// Custom Hook for Toast Notifications
+const useToast = () => {
+  const [toast, setToast] = useState(null);
+  
+  const showToast = useCallback((message, type = 'success', duration = 3500) => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), duration);
+  }, []);
 
+  return { toast, showToast };
+};
+
+// Toast Component
+const Toast = ({ toast }) => {
+  if (!toast) return null;
+  
+  const colors = {
+    success: THEME.unilusGreen,
+    error: THEME.danger,
+    warning: THEME.warning,
+    info: '#0284C7',
+  };
+
+  return (
+    <div className="toast-container">
+      <div className={`toast toast-${toast.type}`}>
+        <span className="toast-icon">
+          {toast.type === 'success' && '✓'}
+          {toast.type === 'error' && '✕'}
+          {toast.type === 'warning' && '⚠'}
+          {toast.type === 'info' && 'ℹ'}
+        </span>
+        <span>{toast.message}</span>
+      </div>
+    </div>
+  );
+};
+
+// Enhanced Listing Card Component
+const ListingCard = ({ item, onReserve, currentUser }) => {
   const [activeImgIndex, setActiveImgIndex] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
+  const [isReserving, setIsReserving] = useState(false);
+
+  const images = useMemo(() => {
+    try {
+      if (item.image_url) {
+        return typeof item.image_url === 'string' && item.image_url.startsWith('[')
+          ? JSON.parse(item.image_url)
+          : [item.image_url];
+      }
+      return [];
+    } catch {
+      return [item.image_url];
+    }
+  }, [item.image_url]);
+
+  const handleReserveClick = async () => {
+    setIsReserving(true);
+    await onReserve(item.id);
+    setIsReserving(false);
+  };
+
+  const nextImage = (e) => {
+    e.stopPropagation();
+    setActiveImgIndex((prev) => (prev + 1) % images.length);
+  };
+
+  const prevImage = (e) => {
+    e.stopPropagation();
+    setActiveImgIndex((prev) => (prev === 0 ? images.length - 1 : prev - 1));
+  };
 
   return (
     <div
+      className={`listing-card ${isHovered ? 'hovered' : ''}`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      style={{
-        border: `1px solid ${isHovered ? THEME.emerald : THEME.borderGreen}`,
-        borderRadius: '12px',
-        overflow: 'hidden',
-        backgroundColor: THEME.cardBg,
-        backdropFilter: 'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        boxShadow: isHovered 
-          ? '0 12px 24px rgba(0, 77, 37, 0.35)' 
-          : '0 4px 12px rgba(0, 0, 0, 0.4)',
-        transform: isHovered ? 'translateY(-4px)' : 'translateY(0)',
-        transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-      }}
     >
-      <div>
-        <div style={{ width: '100%', height: '180px', backgroundColor: '#090D16', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          {images.length > 0 && images[activeImgIndex] ? (
-            <img
-              src={images[activeImgIndex]}
-              alt={item.title}
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              onError={(e) => { e.target.style.display = 'none'; }}
-            />
-          ) : (
-            <span style={{ color: THEME.textMuted, fontSize: '13px' }}>No Image Available</span>
-          )}
+      <div className="listing-image-container">
+        {images.length > 0 && images[activeImgIndex] ? (
+          <img
+            src={images[activeImgIndex]}
+            alt={item.title}
+            className="listing-image"
+            loading="lazy"
+            onError={(e) => { e.target.style.display = 'none'; }}
+          />
+        ) : (
+          <div className="no-image-placeholder">
+            <span>📷</span>
+            <span>No Image</span>
+          </div>
+        )}
 
-          {/* Campus Tag Badge */}
-          <span style={{
-            position: 'absolute',
-            top: '8px',
-            left: '8px',
-            backgroundColor: 'rgba(11, 19, 32, 0.85)',
-            border: `1px solid ${THEME.goldAccent}`,
-            color: THEME.goldAccent,
-            padding: '2px 8px',
-            borderRadius: '10px',
-            fontSize: '10px',
-            fontWeight: 'bold',
-            backdropFilter: 'blur(4px)',
-          }}>
-            📍 {item.campus || 'Silverest Main Campus'}
+        <span className="campus-badge">
+          📍 {item.campus || 'Silverest Main Campus'}
+        </span>
+
+        {images.length > 1 && (
+          <>
+            <button onClick={prevImage} className="image-nav-btn left">
+              ‹
+            </button>
+            <button onClick={nextImage} className="image-nav-btn right">
+              ›
+            </button>
+            <div className="image-dots">
+              {images.map((_, idx) => (
+                <div
+                  key={idx}
+                  className={`dot ${idx === activeImgIndex ? 'active' : ''}`}
+                />
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="listing-content">
+        <div className="listing-header">
+          <h3 className="listing-title">{item.title}</h3>
+          <span className={`stock-badge ${item.quantity > 0 ? 'in-stock' : 'out-of-stock'}`}>
+            {item.quantity > 0 ? `In Stock (${item.quantity})` : 'Sold Out'}
           </span>
-
-          {images.length > 1 && (
-            <>
-              <button
-                onClick={() => setActiveImgIndex((prev) => (prev === 0 ? images.length - 1 : prev - 1))}
-                style={{ position: 'absolute', left: '8px', background: 'rgba(0,0,0,0.7)', color: '#fff', border: 'none', borderRadius: '50%', width: '28px', height: '28px', cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                ‹
-              </button>
-              <button
-                onClick={() => setActiveImgIndex((prev) => (prev === images.length - 1 ? 0 : prev + 1))}
-                style={{ position: 'absolute', right: '8px', background: 'rgba(0,0,0,0.7)', color: '#fff', border: 'none', borderRadius: '50%', width: '28px', height: '28px', cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                ›
-              </button>
-
-              <div style={{ position: 'absolute', bottom: '8px', display: 'flex', gap: '4px' }}>
-                {images.map((_, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      width: '6px',
-                      height: '6px',
-                      borderRadius: '50%',
-                      backgroundColor: idx === activeImgIndex ? THEME.emerald : 'rgba(255,255,255,0.5)',
-                    }}
-                  />
-                ))}
-              </div>
-            </>
-          )}
         </div>
 
-        <div style={{ padding: '15px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-            <h3 style={{ margin: 0, fontSize: '16px', color: THEME.textMain, fontWeight: '600' }}>{item.title}</h3>
-            <span
-              style={{
-                padding: '3px 10px',
-                borderRadius: '12px',
-                fontSize: '11px',
-                fontWeight: 'bold',
-                backgroundColor: item.quantity > 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                color: item.quantity > 0 ? THEME.emerald : '#FCA5A5',
-                border: `1px solid ${item.quantity > 0 ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
-              }}
-            >
-              {item.quantity > 0 ? `In Stock (${item.quantity})` : 'Sold Out'}
-            </span>
-          </div>
+        {item.description && (
+          <p className="listing-description">{item.description}</p>
+        )}
 
-          {item.description && (
-            <p style={{ margin: '0 0 10px 0', color: THEME.textMuted, fontSize: '13px', lineHeight: '1.4' }}>
-              {item.description}
-            </p>
-          )}
-
-          <p style={{ margin: '0 0 5px 0', color: THEME.textMuted, fontSize: '12px' }}>
-            Category: <strong style={{ color: '#E2E8F0' }}>{item.category}</strong>
-          </p>
-
-          <p style={{ margin: '8px 0 0 0', fontSize: '18px', fontWeight: 'bold', color: THEME.emerald }}>
-            ZMW {item.price}
-          </p>
+        <div className="listing-meta">
+          <span>Category: <strong>{item.category}</strong></span>
+          <span className="listing-price">ZMW {item.price}</span>
         </div>
       </div>
 
-      <div style={{ padding: '0 15px 15px 15px' }}>
+      <div className="listing-actions">
         <button
-          onClick={() => onReserve(item.id)}
-          disabled={item.quantity <= 0}
-          style={{
-            width: '100%',
-            padding: '10px',
-            backgroundColor: item.quantity > 0 ? THEME.unilusGreen : '#334155',
-            color: 'white',
-            border: `1px solid ${item.quantity > 0 ? THEME.emerald : '#475569'}`,
-            borderRadius: '6px',
-            fontWeight: 'bold',
-            cursor: item.quantity > 0 ? 'pointer' : 'not-allowed',
-            transition: 'background-color 0.2s ease',
-          }}
-          onMouseOver={(e) => {
-            if (item.quantity > 0) e.target.style.backgroundColor = THEME.unilusDarkGreen;
-          }}
-          onMouseOut={(e) => {
-            if (item.quantity > 0) e.target.style.backgroundColor = THEME.unilusGreen;
-          }}
+          onClick={handleReserveClick}
+          disabled={item.quantity <= 0 || isReserving}
+          className={`reserve-btn ${item.quantity > 0 ? 'available' : 'unavailable'}`}
         >
-          {item.quantity > 0 ? 'Reserve Item' : 'Out of Stock'}
+          {isReserving ? 'Processing...' : item.quantity > 0 ? 'Reserve Item' : 'Out of Stock'}
         </button>
       </div>
     </div>
   );
-}
+};
 
+// Auth Modal Component
+const AuthModal = ({ isOpen, onClose, onAuthSuccess }) => {
+  const [isRegister, setIsRegister] = useState(false);
+  const [authData, setAuthData] = useState({ full_name: '', email: '', password: '', student_id: '' });
+  const [isLoading, setIsLoading] = useState(false);
+  const { showToast } = useToast();
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+
+    const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
+    try {
+      const res = await fetch(`${API_BASE}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(authData),
+      });
+      const data = await res.json();
+      
+      if (data.success) {
+        if (isRegister) {
+          showToast('Registration successful! Please sign in.', 'success');
+          setIsRegister(false);
+        } else {
+          localStorage.setItem('user', JSON.stringify(data.user));
+          localStorage.setItem('token', data.token);
+          onAuthSuccess(data.user);
+          showToast(`Welcome, ${data.user.full_name || data.user.email}!`, 'success');
+          onClose();
+        }
+      } else {
+        showToast(data.error || 'Authentication failed', 'error');
+      }
+    } catch (err) {
+      showToast('Connection error. Please try again.', 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose}>×</button>
+        
+        <div className="auth-header">
+          <div className="auth-logo">U</div>
+          <h2>{isRegister ? 'Create Account' : 'Welcome Back'}</h2>
+          <p>{isRegister ? 'Join the UNILUS student marketplace' : 'Sign in to your student account'}</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="auth-form">
+          {isRegister && (
+            <>
+              <input
+                type="text"
+                placeholder="Full Name"
+                required
+                value={authData.full_name}
+                onChange={(e) => setAuthData({ ...authData, full_name: e.target.value })}
+              />
+              <input
+                type="text"
+                placeholder="Student ID (e.g. UNILUS-2024-001)"
+                required
+                value={authData.student_id}
+                onChange={(e) => setAuthData({ ...authData, student_id: e.target.value })}
+              />
+            </>
+          )}
+          <input
+            type="email"
+            placeholder="Student Email (@unilus.ac.zm)"
+            required
+            value={authData.email}
+            onChange={(e) => setAuthData({ ...authData, email: e.target.value })}
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            required
+            value={authData.password}
+            onChange={(e) => setAuthData({ ...authData, password: e.target.value })}
+          />
+          <button type="submit" disabled={isLoading} className="auth-submit-btn">
+            {isLoading ? 'Processing...' : isRegister ? 'Create Account' : 'Sign In'}
+          </button>
+        </form>
+
+        <p className="auth-toggle" onClick={() => setIsRegister(!isRegister)}>
+          {isRegister ? 'Already have an account? Sign in' : "Need an account? Sign up"}
+        </p>
+      </div>
+    </div>
+  );
+};
+
+// Main App Component
 function App() {
   const [listings, setListings] = useState([]);
   const [currentUser, setCurrentUser] = useState(
     JSON.parse(localStorage.getItem('user')) || null
   );
-
   const [activeTab, setActiveTab] = useState('browse');
-  const [toast, setToast] = useState(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  
+  const { toast, showToast } = useToast();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
+  const [selectedCampus, setSelectedCampus] = useState('All');
 
   const [dashboardData, setDashboardData] = useState({ purchases: [], sales: [] });
   const [activeTxnId, setActiveTxnId] = useState(null);
@@ -219,9 +318,6 @@ function App() {
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({ price: '', quantity: '' });
 
-  const [isRegister, setIsRegister] = useState(false);
-  const [authData, setAuthData] = useState({ full_name: '', email: '', password: '', student_id: '' });
-  
   const initialListingState = {
     title: '',
     description: '',
@@ -231,35 +327,12 @@ function App() {
     campus: CAMPUSES[0],
   };
   const [newListing, setNewListing] = useState(initialListingState);
-  
   const [imageFiles, setImageFiles] = useState([]);
   const [handshakeTxnId, setHandshakeTxnId] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const showToast = (message, type = 'success') => {
-    setToast({ message, type });
-    setTimeout(() => {
-      setToast(null);
-    }, 3500);
-  };
-
-  useEffect(() => {
-    fetchListings();
-    if (currentUser) {
-      fetchDashboard();
-      fetchSellerListings();
-    }
-  }, [currentUser]);
-
-  useEffect(() => {
-    if (!activeTxnId) return;
-    fetchMessages(activeTxnId);
-    const interval = setInterval(() => {
-      fetchMessages(activeTxnId);
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [activeTxnId]);
-
-  const fetchListings = async () => {
+  // Fetch listings
+  const fetchListings = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/api/listings`);
       const data = await res.json();
@@ -267,9 +340,10 @@ function App() {
     } catch (err) {
       console.error('Failed to fetch listings:', err);
     }
-  };
+  }, []);
 
-  const fetchDashboard = async () => {
+  // Fetch dashboard data
+  const fetchDashboard = useCallback(async () => {
     const userId = currentUser?.id || currentUser?.user?.id;
     if (!userId) return;
     try {
@@ -281,9 +355,10 @@ function App() {
     } catch (err) {
       console.error('Failed to fetch dashboard:', err);
     }
-  };
+  }, [currentUser]);
 
-  const fetchSellerListings = async () => {
+  // Fetch seller listings
+  const fetchSellerListings = useCallback(async () => {
     const userId = currentUser?.id || currentUser?.user?.id;
     if (!userId) return;
     try {
@@ -293,9 +368,10 @@ function App() {
     } catch (err) {
       console.error('Failed to load seller listings:', err);
     }
-  };
+  }, [currentUser]);
 
-  const fetchMessages = async (txnId) => {
+  // Fetch messages
+  const fetchMessages = useCallback(async (txnId) => {
     try {
       const res = await fetch(`${API_BASE}/api/transactions/${txnId}/messages`);
       const data = await res.json();
@@ -303,10 +379,35 @@ function App() {
     } catch (err) {
       console.error('Failed to load messages:', err);
     }
+  }, []);
+
+  useEffect(() => {
+    fetchListings();
+  }, [fetchListings]);
+
+  useEffect(() => {
+    if (currentUser) {
+      fetchDashboard();
+      fetchSellerListings();
+    }
+  }, [currentUser, fetchDashboard, fetchSellerListings]);
+
+  useEffect(() => {
+    if (!activeTxnId) return;
+    fetchMessages(activeTxnId);
+    const interval = setInterval(() => fetchMessages(activeTxnId), 3000);
+    return () => clearInterval(interval);
+  }, [activeTxnId, fetchMessages]);
+
+  const handleAuthSuccess = (user) => {
+    setCurrentUser(user);
   };
 
-  const openChat = (txnId) => {
-    setActiveTxnId(txnId);
+  const handleLogout = () => {
+    localStorage.clear();
+    setCurrentUser(null);
+    setActiveTxnId(null);
+    showToast('Logged out successfully', 'info');
   };
 
   const handleDeleteListing = async (listingId) => {
@@ -343,17 +444,16 @@ function App() {
     }
   };
 
-  const filteredListings = listings.filter((item) => {
-    const term = searchTerm.toLowerCase();
-    const matchesSearch =
-      item.title.toLowerCase().includes(term) ||
-      (item.description && item.description.toLowerCase().includes(term));
-
-    const matchesCategory =
-      selectedCategory === 'All' || item.category === selectedCategory;
-
-    return matchesSearch && matchesCategory;
-  });
+  const filteredListings = useMemo(() => {
+    return listings.filter((item) => {
+      const term = searchTerm.toLowerCase();
+      const matchesSearch = item.title.toLowerCase().includes(term) ||
+        (item.description && item.description.toLowerCase().includes(term));
+      const matchesCategory = selectedCategory === 'All' || item.category === selectedCategory;
+      const matchesCampus = selectedCampus === 'All' || item.campus === selectedCampus;
+      return matchesSearch && matchesCategory && matchesCampus;
+    });
+  }, [listings, searchTerm, selectedCategory, selectedCampus]);
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
@@ -377,43 +477,20 @@ function App() {
     }
   };
 
-  const handleAuthSubmit = async (e) => {
-    e.preventDefault();
-    const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
-    try {
-      const res = await fetch(`${API_BASE}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(authData),
-      });
-      const data = await res.json();
-      if (data.success) {
-        if (isRegister) {
-          showToast('Registration successful! Please sign in.');
-          setIsRegister(false);
-        } else {
-          localStorage.setItem('user', JSON.stringify(data.user));
-          localStorage.setItem('token', data.token);
-          setCurrentUser(data.user);
-          showToast(`Welcome back, ${data.user.email}!`);
-        }
-      } else {
-        showToast(data.error || 'Auth failed', 'error');
-      }
-    } catch (err) {
-      showToast('Authentication failed. Server unreachable.', 'error');
-    }
-  };
-
   const handleCreateListing = async (e) => {
     e.preventDefault();
-    if (!currentUser) return showToast('Please log in first.', 'error');
+    if (!currentUser) {
+      showToast('Please log in first.', 'error');
+      return;
+    }
 
     const sellerId = currentUser.id || currentUser.user?.id;
     if (!sellerId) {
-      return showToast('Session issue. Please log out and sign back in.', 'error');
+      showToast('Session issue. Please log out and sign back in.', 'error');
+      return;
     }
 
+    setIsLoading(true);
     const formData = new FormData();
     formData.append('title', newListing.title);
     formData.append('description', newListing.description);
@@ -437,7 +514,6 @@ function App() {
         showToast('Listing created successfully!');
         setNewListing(initialListingState);
         setImageFiles([]);
-
         fetchListings();
         fetchDashboard();
         fetchSellerListings();
@@ -447,12 +523,15 @@ function App() {
       }
     } catch (err) {
       showToast('Failed to create listing', 'error');
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleReserve = async (listingId) => {
     if (!currentUser) {
       showToast('Please log in first to reserve items!', 'error');
+      setIsAuthModalOpen(true);
       return;
     }
 
@@ -471,7 +550,7 @@ function App() {
 
       const data = await res.json();
       if (data.success) {
-        showToast(`Reserved! Transaction ID copied to clipboard.`, 'success');
+        showToast(`Reserved! Transaction ID: ${data.transaction.id.substring(0, 8)}...`, 'success');
         navigator.clipboard.writeText(data.transaction.id);
         fetchListings();
         fetchDashboard();
@@ -504,196 +583,134 @@ function App() {
     }
   };
 
-  const getTabStyle = (tabName) => ({
-    padding: '10px 20px',
-    backgroundColor: activeTab === tabName ? THEME.unilusGreen : THEME.cardBg,
-    color: activeTab === tabName ? '#ffffff' : THEME.textMuted,
-    border: `1px solid ${activeTab === tabName ? THEME.emerald : THEME.borderGreen}`,
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontWeight: 'bold',
-    fontSize: '14px',
-    backdropFilter: 'blur(8px)',
-    transition: 'all 0.2s ease',
-  });
+  const TabButton = ({ tab, label, icon }) => (
+    <button
+      className={`tab-btn ${activeTab === tab ? 'active' : ''}`}
+      onClick={() => setActiveTab(tab)}
+    >
+      {icon && <span className="tab-icon">{icon}</span>}
+      {label}
+    </button>
+  );
 
   return (
-    <div style={{ backgroundColor: THEME.bgDark, minHeight: '100vh', color: THEME.textMain, padding: '24px 20px 20px 20px', fontFamily: "'Inter', system-ui, sans-serif" }}>
-      
-      {/* 1. Official UNILUS Top Brand Accent Bar */}
-      <div style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        height: '4px',
-        background: `linear-gradient(90deg, ${THEME.unilusGreen} 0%, ${THEME.goldAccent} 50%, ${THEME.unilusGreen} 100%)`,
-        zIndex: 9999,
-      }} />
+    <div className="app-container">
+      {/* Top Brand Accent Bar */}
+      <div className="accent-bar" />
 
-      <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
-        
-        {/* UNILUS Header Banner with Crest Emblem */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: `2px solid ${THEME.unilusGreen}`, paddingBottom: '15px', marginBottom: '20px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-            
-            {/* 2. UNILUS Crest Emblem Shield */}
-            <div style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: '8px',
-              backgroundColor: THEME.unilusGreen,
-              border: `2px solid ${THEME.goldAccent}`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: THEME.goldAccent,
-              fontWeight: '900',
-              fontSize: '20px',
-              boxShadow: '0 0 10px rgba(245, 158, 11, 0.25)'
-            }}>
-              U
-            </div>
-
+      <div className="app-content">
+        {/* Header */}
+        <header className="app-header">
+          <div className="header-left">
+            <div className="unilus-crest">U</div>
             <div>
-              <h1 style={{ margin: 0, color: '#ffffff', fontSize: '26px', fontWeight: 'bold', letterSpacing: '0.5px' }}>
-                UniLnk <span style={{ color: THEME.emerald, fontSize: '18px', fontWeight: 'normal' }}>| UNILUS Student Portal</span>
+              <h1 className="header-title">
+                UniLnk <span className="header-subtitle">| UNILUS Student Portal</span>
               </h1>
-              <p style={{ margin: '4px 0 0 0', color: THEME.textMuted, fontSize: '13px' }}>
+              <p className="header-tagline">
                 University of Lusaka Student Marketplace & Services
               </p>
             </div>
           </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: THEME.emerald, boxShadow: `0 0 10px ${THEME.emerald}` }}></div>
-            <span style={{ fontSize: '12px', color: THEME.textMuted, fontWeight: 'bold' }}>Campus Network</span>
+          <div className="header-right">
+            <div className="status-indicator">
+              <span className="status-dot" />
+              <span className="status-text">Campus Network</span>
+            </div>
           </div>
-        </div>
+        </header>
 
-        {toast && (
-          <div
-            style={{
-              position: 'fixed',
-              bottom: '24px',
-              right: '24px',
-              backgroundColor:
-                toast.type === 'error'
-                  ? '#DC2626'
-                  : toast.type === 'info'
-                  ? '#0284C7'
-                  : THEME.unilusGreen,
-              color: '#ffffff',
-              border: `1px solid ${THEME.emerald}`,
-              padding: '14px 22px',
-              borderRadius: '8px',
-              boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
-              zIndex: 1000,
-              fontWeight: 'bold',
-              fontSize: '14px',
-            }}
-          >
-            <span>{toast.message}</span>
-          </div>
-        )}
+        <Toast toast={toast} />
 
+        {/* User Session */}
         {!currentUser ? (
-          <div style={{ border: `1px solid ${THEME.borderGreen}`, padding: '24px', borderRadius: '12px', marginBottom: '20px', backgroundColor: THEME.cardBg, backdropFilter: 'blur(12px)' }}>
-            <h2 style={{ color: THEME.emerald, marginTop: 0 }}>{isRegister ? 'Register Portal Account' : 'Student Sign In'}</h2>
-            <form onSubmit={handleAuthSubmit}>
-              {isRegister && (
-                <>
-                  <input
-                    type="text"
-                    placeholder="Full Name"
-                    required
-                    style={{ display: 'block', width: '100%', marginBottom: '12px', padding: '10px', backgroundColor: '#0B1320', border: `1px solid ${THEME.borderGreen}`, color: '#fff', borderRadius: '4px' }}
-                    onChange={(e) => setAuthData({ ...authData, full_name: e.target.value })}
-                  />
-                  <input
-                    type="text"
-                    placeholder="Student ID (e.g. UNILUS-2024-001)"
-                    required
-                    style={{ display: 'block', width: '100%', marginBottom: '12px', padding: '10px', backgroundColor: '#0B1320', border: `1px solid ${THEME.borderGreen}`, color: '#fff', borderRadius: '4px' }}
-                    onChange={(e) => setAuthData({ ...authData, student_id: e.target.value })}
-                  />
-                </>
-              )}
-              <input
-                type="email"
-                placeholder="Student Email (@unilus.ac.zm)"
-                required
-                style={{ display: 'block', width: '100%', marginBottom: '12px', padding: '10px', backgroundColor: '#0B1320', border: `1px solid ${THEME.borderGreen}`, color: '#fff', borderRadius: '4px' }}
-                onChange={(e) => setAuthData({ ...authData, email: e.target.value })}
-              />
-              <input
-                type="password"
-                placeholder="Password"
-                required
-                style={{ display: 'block', width: '100%', marginBottom: '12px', padding: '10px', backgroundColor: '#0B1320', border: `1px solid ${THEME.borderGreen}`, color: '#fff', borderRadius: '4px' }}
-                onChange={(e) => setAuthData({ ...authData, password: e.target.value })}
-              />
-              <button type="submit" style={{ width: '100%', padding: '12px', backgroundColor: THEME.unilusGreen, color: '#fff', border: `1px solid ${THEME.emerald}`, cursor: 'pointer', fontWeight: 'bold', borderRadius: '4px' }}>
-                {isRegister ? 'Register Account' : 'Access Portal'}
-              </button>
-            </form>
-            <p onClick={() => setIsRegister(!isRegister)} style={{ color: THEME.emerald, cursor: 'pointer', textAlign: 'center', marginTop: '14px', fontSize: '14px' }}>
-              {isRegister ? 'Already registered? Login here' : "Need an account? Register here"}
-            </p>
+          <div className="auth-prompt">
+            <button className="auth-prompt-btn" onClick={() => setIsAuthModalOpen(true)}>
+              Student Sign In
+            </button>
+            <span className="auth-prompt-text">or</span>
+            <button className="auth-prompt-btn secondary" onClick={() => {
+              setIsAuthModalOpen(true);
+            }}>
+              Create Account
+            </button>
           </div>
         ) : (
-          <div style={{ padding: '12px 18px', background: THEME.cardBg, backdropFilter: 'blur(12px)', border: `1px solid ${THEME.borderGreen}`, color: '#fff', borderRadius: '12px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>Active Session: <strong style={{ color: THEME.emerald }}>{currentUser.email}</strong></span>
-            <button onClick={() => { localStorage.clear(); setCurrentUser(null); setActiveTxnId(null); showToast('Logged out'); }} style={{ padding: '6px 14px', background: '#DC2626', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Log Out</button>
+          <div className="user-session">
+            <span className="session-text">
+              Active Session: <strong>{currentUser.full_name || currentUser.email}</strong>
+            </span>
+            <button className="logout-btn" onClick={handleLogout}>
+              Log Out
+            </button>
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-          <button style={getTabStyle('browse')} onClick={() => setActiveTab('browse')}>
-            Browse Marketplace
-          </button>
+        {/* Navigation Tabs */}
+        <nav className="tab-nav">
+          <TabButton tab="browse" label="Browse Marketplace" icon="🛍️" />
           {currentUser && (
             <>
-              <button style={getTabStyle('sell')} onClick={() => setActiveTab('sell')}>
-                + Sell Item
-              </button>
-              <button style={getTabStyle('verify')} onClick={() => setActiveTab('verify')}>
-                Verify Handshake
-              </button>
-              <button style={getTabStyle('dashboard')} onClick={() => setActiveTab('dashboard')}>
-                My Dashboard
-              </button>
+              <TabButton tab="sell" label="Sell Item" icon="➕" />
+              <TabButton tab="verify" label="Verify Handshake" icon="🤝" />
+              <TabButton tab="dashboard" label="My Dashboard" icon="📊" />
             </>
           )}
-        </div>
+        </nav>
 
+        {/* Auth Modal */}
+        <AuthModal
+          isOpen={isAuthModalOpen}
+          onClose={() => setIsAuthModalOpen(false)}
+          onAuthSuccess={handleAuthSuccess}
+        />
+
+        {/* Tab Content */}
         {activeTab === 'browse' && (
-          <div>
-            <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+          <div className="tab-content">
+            <div className="search-filters">
               <input
                 type="text"
                 placeholder="Search items by title or description..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                style={{ flex: 1, padding: '12px', fontSize: '14px', borderRadius: '6px', border: `1px solid ${THEME.borderGreen}`, backgroundColor: THEME.cardBg, color: '#fff', backdropFilter: 'blur(8px)' }}
+                className="search-input"
               />
               <select
                 value={selectedCategory}
                 onChange={(e) => setSelectedCategory(e.target.value)}
-                style={{ padding: '12px', fontSize: '14px', borderRadius: '6px', border: `1px solid ${THEME.borderGreen}`, backgroundColor: THEME.cardBg, color: '#fff', backdropFilter: 'blur(8px)' }}
+                className="filter-select"
               >
                 {CATEGORIES.map((cat) => (
                   <option key={cat} value={cat}>{cat}</option>
                 ))}
               </select>
+              <select
+                value={selectedCampus}
+                onChange={(e) => setSelectedCampus(e.target.value)}
+                className="filter-select"
+              >
+                <option value="All">All Campuses</option>
+                {CAMPUSES.map((camp) => (
+                  <option key={camp} value={camp}>{camp}</option>
+                ))}
+              </select>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '20px' }}>
+            <div className="listings-grid">
               {filteredListings.length === 0 ? (
-                <p style={{ color: THEME.textMuted, gridColumn: '1 / -1' }}>No listings found matching your criteria.</p>
+                <div className="empty-state">
+                  <span className="empty-icon">🔍</span>
+                  <p>No listings found matching your criteria.</p>
+                </div>
               ) : (
                 filteredListings.map((item) => (
-                  <ListingCard key={item.id} item={item} onReserve={handleReserve} />
+                  <ListingCard
+                    key={item.id}
+                    item={item}
+                    onReserve={handleReserve}
+                    currentUser={currentUser}
+                  />
                 ))
               )}
             </div>
@@ -701,198 +718,247 @@ function App() {
         )}
 
         {activeTab === 'sell' && (
-          <div style={{ border: `1px solid ${THEME.borderGreen}`, padding: '24px', borderRadius: '12px', backgroundColor: THEME.cardBg, backdropFilter: 'blur(12px)' }}>
-            <h3 style={{ marginTop: 0, color: THEME.emerald }}>Post New Item for Sale</h3>
-            <form onSubmit={handleCreateListing}>
-              <input
-                type="text"
-                placeholder="Title (e.g. Course Textbook, Calculator)"
-                value={newListing.title}
-                required
-                style={{ display: 'block', width: '100%', marginBottom: '12px', padding: '10px', backgroundColor: '#0B1320', border: `1px solid ${THEME.borderGreen}`, color: '#fff', borderRadius: '4px' }}
-                onChange={(e) => setNewListing({ ...newListing, title: e.target.value })}
-              />
-              <input
-                type="text"
-                placeholder="Description"
-                value={newListing.description}
-                style={{ display: 'block', width: '100%', marginBottom: '12px', padding: '10px', backgroundColor: '#0B1320', border: `1px solid ${THEME.borderGreen}`, color: '#fff', borderRadius: '4px' }}
-                onChange={(e) => setNewListing({ ...newListing, description: e.target.value })}
-              />
-              
-              <label style={{ display: 'block', fontSize: '13px', marginBottom: '6px', color: THEME.textMuted }}>
-                Campus Location:
-              </label>
-              <select
-                name="campus"
-                value={newListing.campus}
-                style={{ display: 'block', width: '100%', marginBottom: '12px', padding: '10px', backgroundColor: '#0B1320', border: `1px solid ${THEME.borderGreen}`, color: '#fff', borderRadius: '4px' }}
-                onChange={(e) => setNewListing({ ...newListing, campus: e.target.value })}
-              >
-                {CAMPUSES.map((camp) => (
-                  <option key={camp} value={camp}>{camp}</option>
-                ))}
-              </select>
+          <div className="tab-content">
+            <div className="sell-form-container">
+              <h2 className="section-title">Post New Item for Sale</h2>
+              <form onSubmit={handleCreateListing} className="sell-form">
+                <input
+                  type="text"
+                  placeholder="Title (e.g. Course Textbook, Calculator)"
+                  value={newListing.title}
+                  required
+                  onChange={(e) => setNewListing({ ...newListing, title: e.target.value })}
+                  className="form-input"
+                />
+                <textarea
+                  placeholder="Description"
+                  value={newListing.description}
+                  onChange={(e) => setNewListing({ ...newListing, description: e.target.value })}
+                  className="form-textarea"
+                  rows="3"
+                />
+                
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Campus Location</label>
+                    <select
+                      value={newListing.campus}
+                      onChange={(e) => setNewListing({ ...newListing, campus: e.target.value })}
+                      className="form-select"
+                    >
+                      {CAMPUSES.map((camp) => (
+                        <option key={camp} value={camp}>{camp}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>Category</label>
+                    <select
+                      value={newListing.category}
+                      onChange={(e) => setNewListing({ ...newListing, category: e.target.value })}
+                      className="form-select"
+                    >
+                      {CATEGORIES.filter(c => c !== 'All').map((cat) => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
 
-              <label style={{ display: 'block', fontSize: '13px', marginBottom: '6px', color: THEME.textMuted }}>
-                Upload Photos (Select up to 5 images):
-              </label>
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                style={{ display: 'block', width: '100%', marginBottom: '12px', color: THEME.textMuted }}
-                onChange={(e) => setImageFiles(Array.from(e.target.files))}
-              />
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Price (ZMW)</label>
+                    <input
+                      type="number"
+                      placeholder="0.00"
+                      value={newListing.price}
+                      required
+                      onChange={(e) => setNewListing({ ...newListing, price: e.target.value })}
+                      className="form-input"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Quantity</label>
+                    <input
+                      type="number"
+                      placeholder="1"
+                      value={newListing.quantity}
+                      onChange={(e) => setNewListing({ ...newListing, quantity: e.target.value })}
+                      className="form-input"
+                    />
+                  </div>
+                </div>
 
-              <input
-                type="number"
-                placeholder="Price (ZMW)"
-                value={newListing.price}
-                required
-                style={{ display: 'block', width: '100%', marginBottom: '12px', padding: '10px', backgroundColor: '#0B1320', border: `1px solid ${THEME.borderGreen}`, color: '#fff', borderRadius: '4px' }}
-                onChange={(e) => setNewListing({ ...newListing, price: e.target.value })}
-              />
-              <input
-                type="number"
-                placeholder="Quantity"
-                value={newListing.quantity}
-                style={{ display: 'block', width: '100%', marginBottom: '12px', padding: '10px', backgroundColor: '#0B1320', border: `1px solid ${THEME.borderGreen}`, color: '#fff', borderRadius: '4px' }}
-                onChange={(e) => setNewListing({ ...newListing, quantity: e.target.value })}
-              />
-              <select
-                value={newListing.category}
-                style={{ display: 'block', width: '100%', marginBottom: '16px', padding: '10px', backgroundColor: '#0B1320', border: `1px solid ${THEME.borderGreen}`, color: '#fff', borderRadius: '4px' }}
-                onChange={(e) => setNewListing({ ...newListing, category: e.target.value })}
-              >
-                {CATEGORIES.filter(c => c !== 'All').map((cat) => (
-                  <option key={cat} value={cat}>{cat}</option>
-                ))}
-              </select>
-              <button type="submit" style={{ padding: '12px 24px', backgroundColor: THEME.unilusGreen, color: 'white', border: `1px solid ${THEME.emerald}`, cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold' }}>
-                Publish Listing
-              </button>
-            </form>
+                <div className="form-group">
+                  <label>Upload Photos (Select up to 5 images)</label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={(e) => setImageFiles(Array.from(e.target.files))}
+                    className="form-file-input"
+                  />
+                  {imageFiles.length > 0 && (
+                    <p className="file-count">{imageFiles.length} image(s) selected</p>
+                  )}
+                </div>
+
+                <button type="submit" disabled={isLoading} className="submit-btn">
+                  {isLoading ? 'Publishing...' : 'Publish Listing'}
+                </button>
+              </form>
+            </div>
           </div>
         )}
 
         {activeTab === 'verify' && (
-          <div style={{ border: `1px solid ${THEME.borderGreen}`, padding: '24px', borderRadius: '12px', backgroundColor: THEME.cardBg, backdropFilter: 'blur(12px)' }}>
-            <h3 style={{ marginTop: 0, color: THEME.emerald }}>Handshake Verification</h3>
-            <p style={{ color: THEME.textMuted, fontSize: '14px' }}>Enter the transaction UUID to complete an in-person exchange on campus.</p>
-            <form onSubmit={handleHandshake}>
-              <input
-                type="text"
-                placeholder="Transaction UUID..."
-                value={handshakeTxnId}
-                onChange={(e) => setHandshakeTxnId(e.target.value)}
-                style={{ width: '65%', padding: '10px', marginRight: '10px', backgroundColor: '#0B1320', border: `1px solid ${THEME.borderGreen}`, color: '#fff', borderRadius: '4px' }}
-                required
-              />
-              <button type="submit" style={{ padding: '10px 20px', backgroundColor: THEME.unilusGreen, color: 'white', border: `1px solid ${THEME.emerald}`, borderRadius: '4px', fontWeight: 'bold' }}>Verify Handshake</button>
-            </form>
+          <div className="tab-content">
+            <div className="verify-container">
+              <h2 className="section-title">Handshake Verification</h2>
+              <p className="verify-description">
+                Enter the transaction UUID to complete an in-person exchange on campus.
+              </p>
+              <form onSubmit={handleHandshake} className="verify-form">
+                <input
+                  type="text"
+                  placeholder="Transaction UUID..."
+                  value={handshakeTxnId}
+                  onChange={(e) => setHandshakeTxnId(e.target.value)}
+                  className="verify-input"
+                  required
+                />
+                <button type="submit" className="verify-btn">
+                  Verify Handshake
+                </button>
+              </form>
+            </div>
           </div>
         )}
 
         {activeTab === 'dashboard' && currentUser && (
-          <div style={{ border: `1px solid ${THEME.borderGreen}`, padding: '24px', borderRadius: '12px', backgroundColor: THEME.cardBg, backdropFilter: 'blur(12px)', color: '#fff' }}>
-            <h2 style={{ color: THEME.emerald, marginTop: 0 }}>Student Dashboard</h2>
+          <div className="tab-content">
+            <div className="dashboard-container">
+              <h2 className="section-title">Student Dashboard</h2>
 
-            <h3>My Active Listings</h3>
-            {sellerListings.length === 0 ? (
-              <p style={{ color: THEME.textMuted }}>You have no active listings.</p>
-            ) : (
-              <div style={{ display: 'grid', gap: '10px', marginBottom: '20px' }}>
-                {sellerListings.map((item) => (
-                  <div key={item.id} style={{ border: `1px solid ${THEME.borderGreen}`, padding: '12px', borderRadius: '6px', background: '#0B1320' }}>
-                    <strong>{item.title}</strong> — ZMW {item.price} (Stock: {item.quantity})
-                    <div style={{ marginTop: '8px' }}>
-                      {editingId === item.id ? (
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                          <input
-                            type="number"
-                            placeholder="Price"
-                            value={editForm.price}
-                            onChange={(e) => setEditForm({ ...editForm, price: e.target.value })}
-                            style={{ padding: '6px', backgroundColor: THEME.cardBg, color: '#fff', border: '1px solid #333' }}
-                          />
-                          <input
-                            type="number"
-                            placeholder="Quantity"
-                            value={editForm.quantity}
-                            onChange={(e) => setEditForm({ ...editForm, quantity: e.target.value })}
-                            style={{ padding: '6px', backgroundColor: THEME.cardBg, color: '#fff', border: '1px solid #333' }}
-                          />
-                          <button onClick={() => handleUpdateListing(item.id)} style={{ padding: '6px 12px', backgroundColor: THEME.unilusGreen, color: '#fff', border: 'none' }}>Save</button>
-                          <button onClick={() => setEditingId(null)} style={{ padding: '6px 12px', backgroundColor: '#475569', color: '#fff', border: 'none' }}>Cancel</button>
+              <div className="dashboard-section">
+                <h3 className="dashboard-subtitle">My Active Listings</h3>
+                {sellerListings.length === 0 ? (
+                  <p className="empty-text">You have no active listings.</p>
+                ) : (
+                  <div className="listings-list">
+                    {sellerListings.map((item) => (
+                      <div key={item.id} className="listing-item">
+                        <div className="listing-item-info">
+                          <strong>{item.title}</strong>
+                          <span className="listing-item-price">ZMW {item.price}</span>
+                          <span className="listing-item-stock">Stock: {item.quantity}</span>
                         </div>
-                      ) : (
-                        <>
-                          <button
-                            onClick={() => {
-                              setEditingId(item.id);
-                              setEditForm({ price: item.price, quantity: item.quantity });
-                            }}
-                            style={{ marginRight: '8px', padding: '6px 12px', cursor: 'pointer', backgroundColor: THEME.unilusGreen, color: '#fff', border: 'none', borderRadius: '4px' }}
-                          >
-                            Edit Price/Stock
-                          </button>
-                          <button
-                            onClick={() => handleDeleteListing(item.id)}
-                            style={{ backgroundColor: '#DC2626', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer' }}
-                          >
-                            Delete
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <h3>My Reserved Purchases</h3>
-            {dashboardData.purchases.length === 0 ? <p style={{ color: THEME.textMuted }}>No reserved items.</p> : (
-              <ul>
-                {dashboardData.purchases.map((p) => (
-                  <li key={p.transaction_id} style={{ marginBottom: '12px' }}>
-                    <strong>{p.title}</strong> (ZMW {p.total_price}) — Status: <span style={{ color: p.status === 'VERIFIED' ? THEME.emerald : '#F59E0B', fontWeight: 'bold' }}>{p.status}</span>
-                    <br />
-                    <button onClick={() => openChat(p.transaction_id)} style={{ marginTop: '6px', padding: '6px 12px', cursor: 'pointer', backgroundColor: THEME.unilusGreen, color: 'white', border: `1px solid ${THEME.emerald}`, borderRadius: '4px' }}>
-                      Open Messenger
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {activeTxnId && (
-              <div style={{ border: `1px solid ${THEME.borderGreen}`, padding: '16px', borderRadius: '8px', background: '#0B1320', marginTop: '20px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h4 style={{ margin: 0, color: THEME.emerald }}>Campus Chat ({activeTxnId.substring(0, 8)}...)</h4>
-                  <span style={{ fontSize: '12px', color: THEME.emerald, fontWeight: 'bold' }}>● Live</span>
-                </div>
-                <div style={{ height: '160px', overflowY: 'auto', border: `1px solid ${THEME.borderGreen}`, padding: '10px', margin: '12px 0', background: THEME.cardBg, borderRadius: '4px' }}>
-                  {chatMessages.length === 0 ? <p style={{ color: THEME.textMuted }}>No messages exchanged yet.</p> : (
-                    chatMessages.map((m) => (
-                      <div key={m.id} style={{ marginBottom: '8px' }}>
-                        <strong style={{ color: THEME.emerald }}>{m.sender_name}:</strong> {m.message_text}
+                        <div className="listing-item-actions">
+                          {editingId === item.id ? (
+                            <div className="edit-form">
+                              <input
+                                type="number"
+                                placeholder="Price"
+                                value={editForm.price}
+                                onChange={(e) => setEditForm({ ...editForm, price: e.target.value })}
+                                className="edit-input"
+                              />
+                              <input
+                                type="number"
+                                placeholder="Quantity"
+                                value={editForm.quantity}
+                                onChange={(e) => setEditForm({ ...editForm, quantity: e.target.value })}
+                                className="edit-input"
+                              />
+                              <button onClick={() => handleUpdateListing(item.id)} className="save-btn">Save</button>
+                              <button onClick={() => setEditingId(null)} className="cancel-btn">Cancel</button>
+                            </div>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => {
+                                  setEditingId(item.id);
+                                  setEditForm({ price: item.price, quantity: item.quantity });
+                                }}
+                                className="edit-btn"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleDeleteListing(item.id)}
+                                className="delete-btn"
+                              >
+                                Delete
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </div>
-                    ))
-                  )}
-                </div>
-                <form onSubmit={handleSendMessage} style={{ display: 'flex' }}>
-                  <input
-                    type="text"
-                    placeholder="Type message..."
-                    value={newMessageText}
-                    onChange={(e) => setNewMessageText(e.target.value)}
-                    style={{ flex: 1, padding: '10px', marginRight: '8px', backgroundColor: THEME.bgDark, border: `1px solid ${THEME.borderGreen}`, color: '#fff', borderRadius: '4px' }}
-                  />
-                  <button type="submit" style={{ padding: '10px 20px', backgroundColor: THEME.unilusGreen, color: 'white', border: `1px solid ${THEME.emerald}`, borderRadius: '4px' }}>Send</button>
-                </form>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
+
+              <div className="dashboard-section">
+                <h3 className="dashboard-subtitle">My Reserved Purchases</h3>
+                {dashboardData.purchases.length === 0 ? (
+                  <p className="empty-text">No reserved items.</p>
+                ) : (
+                  <div className="purchases-list">
+                    {dashboardData.purchases.map((p) => (
+                      <div key={p.transaction_id} className="purchase-item">
+                        <div className="purchase-info">
+                          <strong>{p.title}</strong>
+                          <span>ZMW {p.total_price}</span>
+                          <span className={`status-badge ${p.status.toLowerCase()}`}>
+                            {p.status}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => openChat(p.transaction_id)}
+                          className="chat-btn"
+                        >
+                          💬 Open Messenger
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {activeTxnId && (
+                <div className="chat-container">
+                  <div className="chat-header">
+                    <h4 className="chat-title">
+                      💬 Campus Chat ({activeTxnId.substring(0, 8)}...)
+                    </h4>
+                    <span className="chat-status">● Live</span>
+                  </div>
+                  <div className="chat-messages">
+                    {chatMessages.length === 0 ? (
+                      <p className="empty-text">No messages exchanged yet.</p>
+                    ) : (
+                      chatMessages.map((m) => (
+                        <div key={m.id} className={`chat-message ${m.sender_id === (currentUser?.id || currentUser?.user?.id) ? 'sent' : 'received'}`}>
+                          <span className="sender-name">{m.sender_name}:</span>
+                          <span className="message-text">{m.message_text}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <form onSubmit={handleSendMessage} className="chat-input-form">
+                    <input
+                      type="text"
+                      placeholder="Type message..."
+                      value={newMessageText}
+                      onChange={(e) => setNewMessageText(e.target.value)}
+                      className="chat-input"
+                    />
+                    <button type="submit" className="chat-send-btn">Send</button>
+                  </form>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import './App.css';
 
 // Dynamic API Base URL
 const API_BASE = window.location.hostname === 'localhost' 
   ? 'http://localhost:5000' 
-  : 'https://unilnk-backend-api.onrender.com';
+  : 'https://your-backend-url.onrender.com'; // CHANGE THIS!
 
 const CATEGORIES = [
   'All',
@@ -30,13 +30,13 @@ const THEME = {
   unilusDarkGreen: '#003318',
   emerald: '#10B981',
   goldAccent: '#F59E0B',
-  goldLight: '#FCD34D',
   bgDark: '#0B1320',
   cardBg: 'rgba(21, 34, 56, 0.75)',
   borderGreen: 'rgba(0, 102, 51, 0.6)',
   textMain: '#F8FAFC',
   textMuted: '#94A3B8',
   textLight: '#E2E8F0',
+  goldLight: '#FCD34D',
   warning: '#F59E0B',
   success: '#10B981',
   danger: '#EF4444',
@@ -69,7 +69,254 @@ const Toast = ({ toast }) => {
   );
 };
 
-// ============ LISTING CARD WITH CHAT BUTTON ============
+// ============ CHAT INBOX COMPONENT ============
+const ChatInbox = ({ currentUser, onOpenChat, API_BASE }) => {
+  const [conversations, setConversations] = useState([]);
+  const [totalUnread, setTotalUnread] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    if (currentUser) {
+      fetchConversations();
+      const interval = setInterval(fetchConversations, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [currentUser]);
+
+  const fetchConversations = async () => {
+    const userId = currentUser?.id || currentUser?.user?.id;
+    if (!userId) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/chat/conversations/${userId}`);
+      const data = await res.json();
+      if (data.success) {
+        setConversations(data.conversations);
+        const total = data.conversations.reduce((sum, conv) => sum + (conv.unread_count || 0), 0);
+        setTotalUnread(total);
+      }
+    } catch (err) {
+      console.error('Failed to fetch conversations:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (isLoading) {
+    return <div className="chat-inbox-loading">Loading conversations...</div>;
+  }
+
+  if (conversations.length === 0) {
+    return (
+      <div className="chat-inbox-empty">
+        <span className="empty-icon">💬</span>
+        <p>No conversations yet</p>
+        <p className="empty-subtext">Start chatting with sellers by clicking "Ask Seller" on any listing</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="chat-inbox">
+      <div className="chat-inbox-header">
+        <h3>💬 Messages</h3>
+        {totalUnread > 0 && (
+          <span className="unread-badge">{totalUnread} unread</span>
+        )}
+      </div>
+      <div className="conversations-list">
+        {conversations.map((conv) => (
+          <div
+            key={conv.user_id}
+            className={`conversation-item ${conv.unread_count > 0 ? 'has-unread' : ''}`}
+            onClick={() => onOpenChat(conv.user_id, null, conv.user_name)}
+          >
+            <div className="conversation-avatar">
+              <span>{conv.user_name?.charAt(0) || 'U'}</span>
+              {conv.unread_count > 0 && (
+                <span className="unread-dot">{conv.unread_count}</span>
+              )}
+            </div>
+            <div className="conversation-info">
+              <div className="conversation-name">{conv.user_name || 'UNILUS Student'}</div>
+              <div className="conversation-last-message">
+                {conv.last_message || 'No messages yet'}
+              </div>
+              {conv.listing_title && (
+                <div className="conversation-listing">📦 {conv.listing_title}</div>
+              )}
+            </div>
+            <div className="conversation-time">
+              {conv.last_message_time && (
+                <span>{new Date(conv.last_message_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// ============ CHAT MODAL COMPONENT ============
+const ChatModal = ({ isOpen, onClose, sellerId, sellerName, listingId, listingTitle, currentUser, API_BASE }) => {
+  const [messages, setMessages] = useState([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const { showToast } = useToast();
+  const messagesEndRef = useRef(null);
+
+  useEffect(() => {
+    if (isOpen && sellerId && currentUser) {
+      fetchMessages();
+      markAsRead();
+      const interval = setInterval(fetchMessages, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [isOpen, sellerId, currentUser]);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const fetchMessages = async () => {
+    try {
+      const userId = currentUser?.id || currentUser?.user?.id;
+      const res = await fetch(`${API_BASE}/api/chat/messages/${userId}/${sellerId}`);
+      const data = await res.json();
+      if (data.success) {
+        setMessages(data.messages || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch messages:', err);
+    }
+  };
+
+  const markAsRead = async () => {
+    try {
+      const userId = currentUser?.id || currentUser?.user?.id;
+      await fetch(`${API_BASE}/api/chat/mark-read/${userId}/${sellerId}`, {
+        method: 'PUT',
+      });
+    } catch (err) {
+      console.error('Failed to mark messages as read:', err);
+    }
+  };
+
+  const sendMessage = async (e) => {
+    e.preventDefault();
+    if (!newMessage.trim() || !currentUser) return;
+
+    setIsSending(true);
+    try {
+      const userId = currentUser?.id || currentUser?.user?.id;
+      const res = await fetch(`${API_BASE}/api/chat/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sender_id: userId,
+          receiver_id: sellerId,
+          listing_id: listingId,
+          message: newMessage.trim()
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setNewMessage('');
+        fetchMessages();
+        playNotificationSound();
+      } else {
+        showToast('Failed to send message', 'error');
+      }
+    } catch (err) {
+      showToast('Connection error', 'error');
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const playNotificationSound = () => {
+    try {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      oscillator.frequency.value = 800;
+      oscillator.type = 'sine';
+      gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.1);
+    } catch (err) {}
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="chat-modal-overlay" onClick={onClose}>
+      <div className="chat-modal-content" onClick={(e) => e.stopPropagation()}>
+        <div className="chat-modal-header">
+          <div className="chat-header-info">
+            <h3>💬 Chat with {sellerName || 'Seller'}</h3>
+            {listingTitle && (
+              <p className="chat-listing-title">About: {listingTitle}</p>
+            )}
+          </div>
+          <button className="modal-close-btn" onClick={onClose}>×</button>
+        </div>
+
+        <div className="chat-messages-container">
+          {messages.length === 0 ? (
+            <div className="chat-empty">
+              <span>💬</span>
+              <p>No messages yet. Start the conversation!</p>
+            </div>
+          ) : (
+            <>
+              {messages.map((msg, index) => {
+                const userId = currentUser?.id || currentUser?.user?.id;
+                const isSent = msg.sender_id === userId;
+                return (
+                  <div key={index} className={`chat-message ${isSent ? 'sent' : 'received'}`}>
+                    <div className="message-bubble">
+                      <span className="sender-name">{msg.sender_name || 'Student'}</span>
+                      <span className="message-text">{msg.message}</span>
+                      <span className="message-time">
+                        {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={messagesEndRef} />
+            </>
+          )}
+        </div>
+
+        <form onSubmit={sendMessage} className="chat-input-form">
+          <input
+            type="text"
+            placeholder="Type your message..."
+            value={newMessage}
+            onChange={(e) => setNewMessage(e.target.value)}
+            className="chat-input"
+            disabled={isSending}
+          />
+          <button type="submit" className="chat-send-btn" disabled={isSending}>
+            {isSending ? 'Sending...' : 'Send'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// ============ LISTING CARD ============
 const ListingCard = ({ item, onReserve, onOpenChat, currentUser }) => {
   const [activeImgIndex, setActiveImgIndex] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
@@ -97,7 +344,7 @@ const ListingCard = ({ item, onReserve, onOpenChat, currentUser }) => {
       onOpenChat(null, null, null, true);
       return;
     }
-    onOpenChat(item.seller_id, item.id, item.title);
+    onOpenChat(item.seller_id, item.id, item.seller_name || 'Seller');
   };
 
   return (
@@ -266,211 +513,6 @@ const ListingCard = ({ item, onReserve, onOpenChat, currentUser }) => {
   );
 };
 
-// ============ CHAT MODAL ============
-const ChatModal = ({ isOpen, onClose, sellerId, listingId, listingTitle, currentUser, API_BASE }) => {
-  const [messages, setMessages] = useState([]);
-  const [newMessage, setNewMessage] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const { showToast } = useToast();
-
-  useEffect(() => {
-    if (isOpen && sellerId && currentUser) {
-      fetchMessages();
-      const interval = setInterval(fetchMessages, 3000);
-      return () => clearInterval(interval);
-    }
-  }, [isOpen, sellerId, currentUser]);
-
-  const fetchMessages = async () => {
-    try {
-      const userId = currentUser?.id || currentUser?.user?.id;
-      const res = await fetch(`${API_BASE}/api/chat/${userId}/${sellerId}`);
-      const data = await res.json();
-      if (data.success) {
-        setMessages(data.messages || []);
-      }
-    } catch (err) {
-      console.error('Failed to fetch messages:', err);
-    }
-  };
-
-  const sendMessage = async (e) => {
-    e.preventDefault();
-    if (!newMessage.trim() || !currentUser) return;
-
-    setIsLoading(true);
-    try {
-      const userId = currentUser?.id || currentUser?.user?.id;
-      const res = await fetch(`${API_BASE}/api/chat/send`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sender_id: userId,
-          receiver_id: sellerId,
-          listing_id: listingId,
-          message: newMessage.trim()
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setNewMessage('');
-        fetchMessages();
-      } else {
-        showToast('Failed to send message', 'error');
-      }
-    } catch (err) {
-      showToast('Connection error', 'error');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  if (!isOpen) return null;
-
-  return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'rgba(0, 0, 0, 0.7)',
-      backdropFilter: 'blur(8px)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1000,
-    }} onClick={onClose}>
-      <div style={{
-        background: THEME.bgDark,
-        border: `1px solid ${THEME.borderGreen}`,
-        borderRadius: '16px',
-        maxWidth: '500px',
-        width: '95%',
-        maxHeight: '80vh',
-        display: 'flex',
-        flexDirection: 'column',
-        position: 'relative',
-        overflow: 'hidden',
-      }} onClick={(e) => e.stopPropagation()}>
-        
-        <div style={{
-          padding: '20px 24px',
-          borderBottom: `1px solid ${THEME.borderGreen}`,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          background: THEME.cardBg,
-          flexShrink: 0,
-        }}>
-          <div>
-            <h3 style={{ margin: 0, color: THEME.emerald, fontSize: '18px' }}>💬 Chat with Seller</h3>
-            <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: THEME.textMuted }}>About: {listingTitle || 'Item'}</p>
-          </div>
-          <button onClick={onClose} style={{
-            background: 'none',
-            border: 'none',
-            color: THEME.textMuted,
-            fontSize: '28px',
-            cursor: 'pointer',
-          }}>×</button>
-        </div>
-
-        <div style={{
-          flex: 1,
-          overflowY: 'auto',
-          padding: '20px 24px',
-          minHeight: '300px',
-          maxHeight: '400px',
-          background: 'rgba(11, 19, 32, 0.3)',
-        }}>
-          {messages.length === 0 ? (
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '100%',
-              color: THEME.textMuted,
-              gap: '12px',
-            }}>
-              <span style={{ fontSize: '48px' }}>💬</span>
-              <p style={{ fontSize: '14px', margin: 0 }}>No messages yet. Start the conversation!</p>
-            </div>
-          ) : (
-            messages.map((msg, index) => {
-              const userId = currentUser?.id || currentUser?.user?.id;
-              const isSent = msg.sender_id === userId;
-              return (
-                <div 
-                  key={index} 
-                  style={{
-                    marginBottom: '12px',
-                    padding: '10px 14px',
-                    borderRadius: '10px',
-                    maxWidth: '85%',
-                    wordWrap: 'break-word',
-                    background: isSent ? THEME.unilusGreen : 'rgba(255, 255, 255, 0.06)',
-                    marginLeft: isSent ? 'auto' : '0',
-                    borderBottomRightRadius: isSent ? '4px' : '10px',
-                    borderBottomLeftRadius: isSent ? '10px' : '4px',
-                    color: isSent ? '#fff' : THEME.textMain,
-                  }}
-                >
-                  <span style={{ fontWeight: 'bold', color: isSent ? THEME.goldLight : THEME.emerald, marginRight: '6px', fontSize: '13px' }}>
-                    {msg.sender_name || 'Student'}:
-                  </span>
-                  <span style={{ fontSize: '14px', lineHeight: '1.4' }}>{msg.message}</span>
-                  <span style={{ fontSize: '10px', opacity: 0.6, marginLeft: '8px', display: 'inline-block' }}>
-                    {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        <form onSubmit={sendMessage} style={{
-          padding: '16px 24px',
-          borderTop: `1px solid ${THEME.borderGreen}`,
-          display: 'flex',
-          gap: '12px',
-          background: THEME.bgDark,
-          flexShrink: 0,
-        }}>
-          <input
-            type="text"
-            placeholder="Type your message..."
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-            style={{
-              flex: 1,
-              padding: '12px 16px',
-              background: THEME.bgDark,
-              border: `1px solid ${THEME.borderGreen}`,
-              color: '#fff',
-              borderRadius: '6px',
-              fontSize: '14px',
-            }}
-            disabled={isLoading}
-          />
-          <button type="submit" style={{
-            padding: '12px 24px',
-            background: THEME.unilusGreen,
-            color: 'white',
-            border: `1px solid ${THEME.emerald}`,
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontWeight: 'bold',
-          }} disabled={isLoading}>
-            {isLoading ? 'Sending...' : 'Send'}
-          </button>
-        </form>
-      </div>
-    </div>
-  );
-};
-
 // ============ AUTH MODAL ============
 const AuthModal = ({ isOpen, onClose, onAuthSuccess }) => {
   const [isRegister, setIsRegister] = useState(false);
@@ -515,68 +557,23 @@ const AuthModal = ({ isOpen, onClose, onAuthSuccess }) => {
   if (!isOpen) return null;
 
   return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'rgba(0, 0, 0, 0.7)',
-      backdropFilter: 'blur(8px)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1000,
-    }} onClick={onClose}>
-      <div style={{
-        background: THEME.bgDark,
-        border: `1px solid ${THEME.borderGreen}`,
-        borderRadius: '16px',
-        padding: '32px',
-        maxWidth: '440px',
-        width: '90%',
-        position: 'relative',
-        maxHeight: '90vh',
-        overflowY: 'auto',
-      }} onClick={(e) => e.stopPropagation()}>
-        <button onClick={onClose} style={{
-          position: 'absolute',
-          top: '12px',
-          right: '16px',
-          background: 'none',
-          border: 'none',
-          color: THEME.textMuted,
-          fontSize: '28px',
-          cursor: 'pointer',
-        }}>×</button>
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose}>×</button>
         
-        <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-          <div style={{
-            width: '56px',
-            height: '56px',
-            borderRadius: '12px',
-            background: THEME.unilusGreen,
-            border: `2px solid ${THEME.goldAccent}`,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: THEME.goldAccent,
-            fontWeight: '900',
-            fontSize: '24px',
-            margin: '0 auto 16px',
-          }}>U</div>
-          <h2 style={{ margin: 0, color: '#fff', fontSize: '22px' }}>{isRegister ? 'Create Account' : 'Welcome Back'}</h2>
-          <p style={{ color: THEME.textMuted, fontSize: '14px' }}>{isRegister ? 'Join the UNILUS student marketplace' : 'Sign in to your student account'}</p>
+        <div className="auth-header">
+          <div className="auth-logo">U</div>
+          <h2>{isRegister ? 'Create Account' : 'Welcome Back'}</h2>
+          <p>{isRegister ? 'Join the UNILUS student marketplace' : 'Sign in to your student account'}</p>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <form onSubmit={handleSubmit} className="auth-form">
           {isRegister && (
             <>
               <input
                 type="text"
                 placeholder="Full Name"
                 required
-                style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.05)', border: `1px solid ${THEME.borderGreen}`, borderRadius: '8px', color: '#fff', fontSize: '14px' }}
                 value={authData.full_name}
                 onChange={(e) => setAuthData({ ...authData, full_name: e.target.value })}
               />
@@ -584,7 +581,6 @@ const AuthModal = ({ isOpen, onClose, onAuthSuccess }) => {
                 type="text"
                 placeholder="Student ID (e.g. UNILUS-2024-001)"
                 required
-                style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.05)', border: `1px solid ${THEME.borderGreen}`, borderRadius: '8px', color: '#fff', fontSize: '14px' }}
                 value={authData.student_id}
                 onChange={(e) => setAuthData({ ...authData, student_id: e.target.value })}
               />
@@ -594,7 +590,6 @@ const AuthModal = ({ isOpen, onClose, onAuthSuccess }) => {
             type="email"
             placeholder="Student Email (@unilus.ac.zm)"
             required
-            style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.05)', border: `1px solid ${THEME.borderGreen}`, borderRadius: '8px', color: '#fff', fontSize: '14px' }}
             value={authData.email}
             onChange={(e) => setAuthData({ ...authData, email: e.target.value })}
           />
@@ -602,31 +597,15 @@ const AuthModal = ({ isOpen, onClose, onAuthSuccess }) => {
             type="password"
             placeholder="Password"
             required
-            style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.05)', border: `1px solid ${THEME.borderGreen}`, borderRadius: '8px', color: '#fff', fontSize: '14px' }}
             value={authData.password}
             onChange={(e) => setAuthData({ ...authData, password: e.target.value })}
           />
-          <button type="submit" disabled={isLoading} style={{
-            padding: '14px',
-            background: THEME.unilusGreen,
-            color: '#fff',
-            border: `1px solid ${THEME.emerald}`,
-            borderRadius: '8px',
-            fontWeight: 'bold',
-            fontSize: '16px',
-            cursor: 'pointer',
-          }}>
+          <button type="submit" disabled={isLoading} className="auth-submit-btn">
             {isLoading ? 'Processing...' : isRegister ? 'Create Account' : 'Sign In'}
           </button>
         </form>
 
-        <p onClick={() => setIsRegister(!isRegister)} style={{
-          textAlign: 'center',
-          marginTop: '16px',
-          color: THEME.emerald,
-          cursor: 'pointer',
-          fontSize: '14px',
-        }}>
+        <p className="auth-toggle" onClick={() => setIsRegister(!isRegister)}>
           {isRegister ? 'Already have an account? Sign in' : "Need an account? Sign up"}
         </p>
       </div>
@@ -648,6 +627,7 @@ function App() {
     listingId: null,
     listingTitle: ''
   });
+  const [lastMessageCount, setLastMessageCount] = useState(0);
   
   const { toast, showToast } = useToast();
 
@@ -677,6 +657,7 @@ function App() {
   const [handshakeTxnId, setHandshakeTxnId] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
+  // Fetch listings
   const fetchListings = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/api/listings`);
@@ -741,6 +722,58 @@ function App() {
     return () => clearInterval(interval);
   }, [activeTxnId, fetchMessages]);
 
+  // Notification system
+  useEffect(() => {
+    if (!currentUser) return;
+    
+    const checkNotifications = async () => {
+      const userId = currentUser?.id || currentUser?.user?.id;
+      try {
+        const res = await fetch(`${API_BASE}/api/chat/unread/total/${userId}`);
+        const data = await res.json();
+        if (data.success && data.total_unread > lastMessageCount) {
+          playNotificationSound();
+          if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification('📩 New Message on UniLnk', {
+              body: `You have ${data.total_unread} unread message(s)`,
+              icon: '/favicon.ico'
+            });
+          }
+          // Show toast notification
+          showToast(`📩 You have ${data.total_unread} new message(s)`, 'info');
+        }
+        setLastMessageCount(data.total_unread || 0);
+      } catch (err) {
+        console.error('Failed to check notifications:', err);
+      }
+    };
+
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+
+    checkNotifications();
+    const interval = setInterval(checkNotifications, 10000);
+    return () => clearInterval(interval);
+  }, [currentUser]);
+
+  const playNotificationSound = () => {
+    try {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      [800, 1000, 1200].forEach((freq, i) => {
+        const osc = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        osc.connect(gain);
+        gain.connect(audioContext.destination);
+        osc.frequency.value = freq;
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(0.08, audioContext.currentTime + i * 0.1);
+        osc.start(audioContext.currentTime + i * 0.1);
+        osc.stop(audioContext.currentTime + i * 0.1 + 0.08);
+      });
+    } catch (err) {}
+  };
+
   const handleAuthSuccess = (user) => {
     setCurrentUser(user);
   };
@@ -797,7 +830,7 @@ function App() {
     });
   }, [listings, searchTerm, selectedCategory, selectedCampus]);
 
-  const handleOpenChat = (sellerId, listingId, listingTitle, requireLogin = false) => {
+  const handleOpenChat = (sellerId, listingId, sellerName, requireLogin = false) => {
     if (requireLogin || !currentUser) {
       setIsAuthModalOpen(true);
       showToast('Please login to chat with sellers', 'info');
@@ -813,7 +846,7 @@ function App() {
       isOpen: true,
       sellerId: sellerId,
       listingId: listingId,
-      listingTitle: listingTitle || 'Item'
+      listingTitle: sellerName || 'Seller'
     });
   };
 
@@ -956,133 +989,107 @@ function App() {
 
   const TabButton = ({ tab, label, icon }) => (
     <button
-      style={{
-        padding: '10px 20px',
-        backgroundColor: activeTab === tab ? THEME.unilusGreen : THEME.cardBg,
-        color: activeTab === tab ? '#ffffff' : THEME.textMuted,
-        border: `1px solid ${activeTab === tab ? THEME.emerald : THEME.borderGreen}`,
-        borderRadius: '6px',
-        cursor: 'pointer',
-        fontWeight: 'bold',
-        fontSize: '14px',
-        backdropFilter: 'blur(8px)',
-        transition: 'all 0.2s ease',
-      }}
+      className={`tab-btn ${activeTab === tab ? 'active' : ''}`}
       onClick={() => setActiveTab(tab)}
     >
-      {icon && <span style={{ marginRight: '6px' }}>{icon}</span>}
+      {icon && <span className="tab-icon">{icon}</span>}
       {label}
     </button>
   );
 
   return (
-    <div style={{ backgroundColor: THEME.bgDark, minHeight: '100vh', color: THEME.textMain, padding: '24px 20px 20px 20px', fontFamily: "'Inter', system-ui, sans-serif" }}>
-      
-      <div style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        height: '4px',
-        background: `linear-gradient(90deg, ${THEME.unilusGreen} 0%, ${THEME.goldAccent} 50%, ${THEME.unilusGreen} 100%)`,
-        zIndex: 9999,
-      }} />
+    <div className="app-container">
+      <div className="accent-bar" />
 
-      <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
-        
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: `2px solid ${THEME.unilusGreen}`, paddingBottom: '15px', marginBottom: '20px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-            <div style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: '8px',
-              backgroundColor: THEME.unilusGreen,
-              border: `2px solid ${THEME.goldAccent}`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: THEME.goldAccent,
-              fontWeight: '900',
-              fontSize: '20px',
-              boxShadow: '0 0 10px rgba(245, 158, 11, 0.25)'
-            }}>
-              U
-            </div>
+      <div className="app-content">
+        {/* Header */}
+        <header className="app-header">
+          <div className="header-left">
+            <div className="unilus-crest">U</div>
             <div>
-              <h1 style={{ margin: 0, color: '#ffffff', fontSize: '26px', fontWeight: 'bold', letterSpacing: '0.5px' }}>
-                UniLnk <span style={{ color: THEME.emerald, fontSize: '18px', fontWeight: 'normal' }}>| UNILUS Student Portal</span>
+              <h1 className="header-title">
+                UniLnk <span className="header-subtitle">| UNILUS Student Portal</span>
               </h1>
-              <p style={{ margin: '4px 0 0 0', color: THEME.textMuted, fontSize: '13px' }}>
-                University of Lusaka Student Marketplace & Services
-              </p>
+              <p className="header-tagline">University of Lusaka Student Marketplace & Services</p>
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: THEME.emerald, boxShadow: `0 0 10px ${THEME.emerald}` }}></div>
-            <span style={{ fontSize: '12px', color: THEME.textMuted, fontWeight: 'bold' }}>Campus Network</span>
+          <div className="header-right">
+            <div className="status-indicator">
+              <span className="status-dot" />
+              <span className="status-text">Campus Network</span>
+            </div>
           </div>
-        </div>
+        </header>
 
         <Toast toast={toast} />
 
+        {/* Auth / User Session */}
         {!currentUser ? (
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', justifyContent: 'center', padding: '16px', background: THEME.cardBg, backdropFilter: 'blur(12px)', border: `1px solid ${THEME.borderGreen}`, borderRadius: '12px', marginBottom: '20px' }}>
-            <button onClick={() => setIsAuthModalOpen(true)} style={{ padding: '10px 24px', background: THEME.unilusGreen, color: '#fff', border: `1px solid ${THEME.emerald}`, borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}>
+          <div className="auth-prompt">
+            <button className="auth-prompt-btn" onClick={() => setIsAuthModalOpen(true)}>
               Student Sign In
             </button>
-            <span style={{ color: THEME.textMuted, fontSize: '14px' }}>or</span>
-            <button onClick={() => setIsAuthModalOpen(true)} style={{ padding: '10px 24px', background: 'transparent', color: '#fff', border: `1px solid ${THEME.textMuted}`, borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}>
+            <span className="auth-prompt-text">or</span>
+            <button className="auth-prompt-btn secondary" onClick={() => setIsAuthModalOpen(true)}>
               Create Account
             </button>
           </div>
         ) : (
-          <div style={{ padding: '12px 18px', background: THEME.cardBg, backdropFilter: 'blur(12px)', border: `1px solid ${THEME.borderGreen}`, borderRadius: '12px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>Active Session: <strong style={{ color: THEME.emerald }}>{currentUser.full_name || currentUser.email}</strong></span>
-            <button onClick={handleLogout} style={{ padding: '6px 14px', background: '#DC2626', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Log Out</button>
+          <div className="user-session">
+            <span className="session-text">
+              Active Session: <strong>{currentUser.full_name || currentUser.email}</strong>
+            </span>
+            <button className="logout-btn" onClick={handleLogout}>Log Out</button>
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
+        {/* Navigation Tabs */}
+        <nav className="tab-nav">
           <TabButton tab="browse" label="Browse Marketplace" icon="🛍️" />
           {currentUser && (
             <>
+              <TabButton tab="messages" label="Messages" icon="💬" />
               <TabButton tab="sell" label="Sell Item" icon="➕" />
               <TabButton tab="verify" label="Verify Handshake" icon="🤝" />
               <TabButton tab="dashboard" label="My Dashboard" icon="📊" />
             </>
           )}
-        </div>
+        </nav>
 
+        {/* Auth Modal */}
         <AuthModal
           isOpen={isAuthModalOpen}
           onClose={() => setIsAuthModalOpen(false)}
           onAuthSuccess={handleAuthSuccess}
         />
 
+        {/* Chat Modal */}
         <ChatModal
           isOpen={chatModal.isOpen}
           onClose={handleCloseChat}
           sellerId={chatModal.sellerId}
+          sellerName={chatModal.listingTitle}
           listingId={chatModal.listingId}
           listingTitle={chatModal.listingTitle}
           currentUser={currentUser}
           API_BASE={API_BASE}
         />
 
+        {/* Tab Content */}
         {activeTab === 'browse' && (
-          <div>
-            <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
+          <div className="tab-content">
+            <div className="search-filters">
               <input
                 type="text"
                 placeholder="Search items by title or description..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                style={{ flex: 1, minWidth: '200px', padding: '12px 16px', fontSize: '14px', borderRadius: '8px', border: `1px solid ${THEME.borderGreen}`, backgroundColor: THEME.cardBg, color: '#fff', backdropFilter: 'blur(8px)' }}
+                className="search-input"
               />
               <select
                 value={selectedCategory}
                 onChange={(e) => setSelectedCategory(e.target.value)}
-                style={{ padding: '12px 16px', fontSize: '14px', borderRadius: '8px', border: `1px solid ${THEME.borderGreen}`, backgroundColor: THEME.cardBg, color: '#fff', backdropFilter: 'blur(8px)', minWidth: '150px' }}
+                className="filter-select"
               >
                 {CATEGORIES.map((cat) => (
                   <option key={cat} value={cat}>{cat}</option>
@@ -1091,7 +1098,7 @@ function App() {
               <select
                 value={selectedCampus}
                 onChange={(e) => setSelectedCampus(e.target.value)}
-                style={{ padding: '12px 16px', fontSize: '14px', borderRadius: '8px', border: `1px solid ${THEME.borderGreen}`, backgroundColor: THEME.cardBg, color: '#fff', backdropFilter: 'blur(8px)', minWidth: '150px' }}
+                className="filter-select"
               >
                 <option value="All">All Campuses</option>
                 {CAMPUSES.map((camp) => (
@@ -1100,9 +1107,9 @@ function App() {
               </select>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '24px' }}>
+            <div className="listings-grid">
               {filteredListings.length === 0 ? (
-                <p style={{ color: THEME.textMuted, gridColumn: '1 / -1', textAlign: 'center', padding: '40px 0' }}>No listings found matching your criteria.</p>
+                <p className="empty-state">No listings found matching your criteria.</p>
               ) : (
                 filteredListings.map((item) => (
                   <ListingCard
@@ -1118,261 +1125,256 @@ function App() {
           </div>
         )}
 
+        {activeTab === 'messages' && currentUser && (
+          <div className="tab-content">
+            <ChatInbox
+              currentUser={currentUser}
+              onOpenChat={handleOpenChat}
+              API_BASE={API_BASE}
+            />
+          </div>
+        )}
+
         {activeTab === 'sell' && (
-          <div style={{ border: `1px solid ${THEME.borderGreen}`, padding: '28px', borderRadius: '14px', backgroundColor: THEME.cardBg, backdropFilter: 'blur(12px)' }}>
-            <h2 style={{ marginTop: 0, color: THEME.emerald }}>Post New Item for Sale</h2>
-            <form onSubmit={handleCreateListing} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <input
-                type="text"
-                placeholder="Title (e.g. Course Textbook, Calculator)"
-                value={newListing.title}
-                required
-                style={{ padding: '12px 16px', background: THEME.bgDark, border: `1px solid ${THEME.borderGreen}`, color: '#fff', borderRadius: '8px', fontSize: '14px' }}
-                onChange={(e) => setNewListing({ ...newListing, title: e.target.value })}
-              />
-              <textarea
-                placeholder="Description"
-                value={newListing.description}
-                style={{ padding: '12px 16px', background: THEME.bgDark, border: `1px solid ${THEME.borderGreen}`, color: '#fff', borderRadius: '8px', fontSize: '14px', resize: 'vertical', fontFamily: 'inherit', minHeight: '80px' }}
-                onChange={(e) => setNewListing({ ...newListing, description: e.target.value })}
-                rows="3"
-              />
-              
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={{ fontSize: '13px', color: THEME.textMuted, fontWeight: '500' }}>Campus Location</label>
-                  <select
-                    value={newListing.campus}
-                    style={{ padding: '12px 16px', background: THEME.bgDark, border: `1px solid ${THEME.borderGreen}`, color: '#fff', borderRadius: '8px', fontSize: '14px' }}
-                    onChange={(e) => setNewListing({ ...newListing, campus: e.target.value })}
-                  >
-                    {CAMPUSES.map((camp) => (
-                      <option key={camp} value={camp}>{camp}</option>
-                    ))}
-                  </select>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={{ fontSize: '13px', color: THEME.textMuted, fontWeight: '500' }}>Category</label>
-                  <select
-                    value={newListing.category}
-                    style={{ padding: '12px 16px', background: THEME.bgDark, border: `1px solid ${THEME.borderGreen}`, color: '#fff', borderRadius: '8px', fontSize: '14px' }}
-                    onChange={(e) => setNewListing({ ...newListing, category: e.target.value })}
-                  >
-                    {CATEGORIES.filter(c => c !== 'All').map((cat) => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={{ fontSize: '13px', color: THEME.textMuted, fontWeight: '500' }}>Price (ZMW)</label>
-                  <input
-                    type="number"
-                    placeholder="0.00"
-                    value={newListing.price}
-                    required
-                    style={{ padding: '12px 16px', background: THEME.bgDark, border: `1px solid ${THEME.borderGreen}`, color: '#fff', borderRadius: '8px', fontSize: '14px' }}
-                    onChange={(e) => setNewListing({ ...newListing, price: e.target.value })}
-                  />
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={{ fontSize: '13px', color: THEME.textMuted, fontWeight: '500' }}>Quantity</label>
-                  <input
-                    type="number"
-                    placeholder="1"
-                    value={newListing.quantity}
-                    style={{ padding: '12px 16px', background: THEME.bgDark, border: `1px solid ${THEME.borderGreen}`, color: '#fff', borderRadius: '8px', fontSize: '14px' }}
-                    onChange={(e) => setNewListing({ ...newListing, quantity: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '13px', color: THEME.textMuted, fontWeight: '500' }}>Upload Photos (Select up to 5 images)</label>
+          <div className="tab-content">
+            <div className="sell-form-container">
+              <h2 className="section-title">Post New Item for Sale</h2>
+              <form onSubmit={handleCreateListing} className="sell-form">
                 <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  style={{ padding: '12px', background: THEME.bgDark, border: `1px solid ${THEME.borderGreen}`, color: THEME.textMuted, borderRadius: '8px', fontSize: '14px', cursor: 'pointer' }}
-                  onChange={(e) => setImageFiles(Array.from(e.target.files))}
+                  type="text"
+                  placeholder="Title (e.g. Course Textbook, Calculator)"
+                  value={newListing.title}
+                  required
+                  className="form-input"
+                  onChange={(e) => setNewListing({ ...newListing, title: e.target.value })}
                 />
-                {imageFiles.length > 0 && (
-                  <p style={{ fontSize: '13px', color: THEME.textMuted, margin: '4px 0 0 0' }}>{imageFiles.length} image(s) selected</p>
-                )}
-              </div>
+                <textarea
+                  placeholder="Description"
+                  value={newListing.description}
+                  className="form-textarea"
+                  onChange={(e) => setNewListing({ ...newListing, description: e.target.value })}
+                  rows="3"
+                />
+                
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Campus Location</label>
+                    <select
+                      value={newListing.campus}
+                      className="form-select"
+                      onChange={(e) => setNewListing({ ...newListing, campus: e.target.value })}
+                    >
+                      {CAMPUSES.map((camp) => (
+                        <option key={camp} value={camp}>{camp}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>Category</label>
+                    <select
+                      value={newListing.category}
+                      className="form-select"
+                      onChange={(e) => setNewListing({ ...newListing, category: e.target.value })}
+                    >
+                      {CATEGORIES.filter(c => c !== 'All').map((cat) => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
 
-              <button type="submit" disabled={isLoading} style={{
-                padding: '14px',
-                background: THEME.unilusGreen,
-                color: 'white',
-                border: `1px solid ${THEME.emerald}`,
-                borderRadius: '8px',
-                fontWeight: 'bold',
-                fontSize: '16px',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-              }}>
-                {isLoading ? 'Publishing...' : 'Publish Listing'}
-              </button>
-            </form>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Price (ZMW)</label>
+                    <input
+                      type="number"
+                      placeholder="0.00"
+                      value={newListing.price}
+                      required
+                      className="form-input"
+                      onChange={(e) => setNewListing({ ...newListing, price: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Quantity</label>
+                    <input
+                      type="number"
+                      placeholder="1"
+                      value={newListing.quantity}
+                      className="form-input"
+                      onChange={(e) => setNewListing({ ...newListing, quantity: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label>Upload Photos (Select up to 5 images)</label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="form-file-input"
+                    onChange={(e) => setImageFiles(Array.from(e.target.files))}
+                  />
+                  {imageFiles.length > 0 && (
+                    <p className="file-count">{imageFiles.length} image(s) selected</p>
+                  )}
+                </div>
+
+                <button type="submit" disabled={isLoading} className="submit-btn">
+                  {isLoading ? 'Publishing...' : 'Publish Listing'}
+                </button>
+              </form>
+            </div>
           </div>
         )}
 
         {activeTab === 'verify' && (
-          <div style={{ border: `1px solid ${THEME.borderGreen}`, padding: '28px', borderRadius: '14px', backgroundColor: THEME.cardBg, backdropFilter: 'blur(12px)' }}>
-            <h2 style={{ marginTop: 0, color: THEME.emerald }}>Handshake Verification</h2>
-            <p style={{ color: THEME.textMuted, fontSize: '14px', marginBottom: '20px' }}>Enter the transaction UUID to complete an in-person exchange on campus.</p>
-            <form onSubmit={handleHandshake} style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-              <input
-                type="text"
-                placeholder="Transaction UUID..."
-                value={handshakeTxnId}
-                onChange={(e) => setHandshakeTxnId(e.target.value)}
-                style={{ flex: 1, minWidth: '200px', padding: '12px 16px', background: THEME.bgDark, border: `1px solid ${THEME.borderGreen}`, color: '#fff', borderRadius: '8px', fontSize: '14px' }}
-                required
-              />
-              <button type="submit" style={{ padding: '12px 24px', background: THEME.unilusGreen, color: 'white', border: `1px solid ${THEME.emerald}`, borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>Verify Handshake</button>
-            </form>
+          <div className="tab-content">
+            <div className="verify-container">
+              <h2 className="section-title">Handshake Verification</h2>
+              <p className="verify-description">
+                Enter the transaction UUID to complete an in-person exchange on campus.
+              </p>
+              <form onSubmit={handleHandshake} className="verify-form">
+                <input
+                  type="text"
+                  placeholder="Transaction UUID..."
+                  value={handshakeTxnId}
+                  onChange={(e) => setHandshakeTxnId(e.target.value)}
+                  className="verify-input"
+                  required
+                />
+                <button type="submit" className="verify-btn">
+                  Verify Handshake
+                </button>
+              </form>
+            </div>
           </div>
         )}
 
         {activeTab === 'dashboard' && currentUser && (
-          <div style={{ border: `1px solid ${THEME.borderGreen}`, padding: '28px', borderRadius: '14px', backgroundColor: THEME.cardBg, backdropFilter: 'blur(12px)' }}>
-            <h2 style={{ color: THEME.emerald, marginTop: 0 }}>Student Dashboard</h2>
+          <div className="tab-content">
+            <div className="dashboard-container">
+              <h2 className="section-title">Student Dashboard</h2>
 
-            <div style={{ marginTop: '24px' }}>
-              <h3 style={{ color: THEME.textLight, fontSize: '18px', margin: '0 0 12px 0' }}>My Active Listings</h3>
-              {sellerListings.length === 0 ? (
-                <p style={{ color: THEME.textMuted }}>You have no active listings.</p>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {sellerListings.map((item) => (
-                    <div key={item.id} style={{ border: `1px solid ${THEME.borderGreen}`, padding: '16px', borderRadius: '8px', background: THEME.bgDark, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-                        <strong>{item.title}</strong>
-                        <span style={{ color: THEME.emerald, fontWeight: 'bold' }}>ZMW {item.price}</span>
-                        <span style={{ color: THEME.textMuted, fontSize: '13px' }}>Stock: {item.quantity}</span>
+              <div className="dashboard-section">
+                <h3 className="dashboard-subtitle">My Active Listings</h3>
+                {sellerListings.length === 0 ? (
+                  <p className="empty-text">You have no active listings.</p>
+                ) : (
+                  <div className="listings-list">
+                    {sellerListings.map((item) => (
+                      <div key={item.id} className="listing-item">
+                        <div className="listing-item-info">
+                          <strong>{item.title}</strong>
+                          <span className="listing-item-price">ZMW {item.price}</span>
+                          <span className="listing-item-stock">Stock: {item.quantity}</span>
+                        </div>
+                        <div className="listing-item-actions">
+                          {editingId === item.id ? (
+                            <div className="edit-form">
+                              <input
+                                type="number"
+                                placeholder="Price"
+                                value={editForm.price}
+                                onChange={(e) => setEditForm({ ...editForm, price: e.target.value })}
+                                className="edit-input"
+                              />
+                              <input
+                                type="number"
+                                placeholder="Quantity"
+                                value={editForm.quantity}
+                                onChange={(e) => setEditForm({ ...editForm, quantity: e.target.value })}
+                                className="edit-input"
+                              />
+                              <button onClick={() => handleUpdateListing(item.id)} className="save-btn">Save</button>
+                              <button onClick={() => setEditingId(null)} className="cancel-btn">Cancel</button>
+                            </div>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => {
+                                  setEditingId(item.id);
+                                  setEditForm({ price: item.price, quantity: item.quantity });
+                                }}
+                                className="edit-btn"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleDeleteListing(item.id)}
+                                className="delete-btn"
+                              >
+                                Delete
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </div>
-                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                        {editingId === item.id ? (
-                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                            <input
-                              type="number"
-                              placeholder="Price"
-                              value={editForm.price}
-                              onChange={(e) => setEditForm({ ...editForm, price: e.target.value })}
-                              style={{ padding: '6px 12px', background: THEME.cardBg, color: '#fff', border: `1px solid ${THEME.borderGreen}`, borderRadius: '4px', width: '80px', fontSize: '13px' }}
-                            />
-                            <input
-                              type="number"
-                              placeholder="Quantity"
-                              value={editForm.quantity}
-                              onChange={(e) => setEditForm({ ...editForm, quantity: e.target.value })}
-                              style={{ padding: '6px 12px', background: THEME.cardBg, color: '#fff', border: `1px solid ${THEME.borderGreen}`, borderRadius: '4px', width: '80px', fontSize: '13px' }}
-                            />
-                            <button onClick={() => handleUpdateListing(item.id)} style={{ padding: '6px 16px', background: THEME.success, color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px' }}>Save</button>
-                            <button onClick={() => setEditingId(null)} style={{ padding: '6px 16px', background: '#475569', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px' }}>Cancel</button>
-                          </div>
-                        ) : (
-                          <>
-                            <button
-                              onClick={() => {
-                                setEditingId(item.id);
-                                setEditForm({ price: item.price, quantity: item.quantity });
-                              }}
-                              style={{ padding: '6px 16px', background: THEME.unilusGreen, color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px' }}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => handleDeleteListing(item.id)}
-                              style={{ padding: '6px 16px', background: '#DC2626', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px' }}
-                            >
-                              Delete
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div style={{ marginTop: '24px' }}>
-              <h3 style={{ color: THEME.textLight, fontSize: '18px', margin: '0 0 12px 0' }}>My Reserved Purchases</h3>
-              {dashboardData.purchases.length === 0 ? (
-                <p style={{ color: THEME.textMuted }}>No reserved items.</p>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {dashboardData.purchases.map((p) => (
-                    <div key={p.transaction_id} style={{ border: `1px solid ${THEME.borderGreen}`, padding: '16px', borderRadius: '8px', background: THEME.bgDark, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-                        <strong>{p.title}</strong>
-                        <span>ZMW {p.total_price}</span>
-                        <span style={{
-                          padding: '3px 12px',
-                          borderRadius: '12px',
-                          fontSize: '11px',
-                          fontWeight: 'bold',
-                          background: p.status === 'VERIFIED' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
-                          color: p.status === 'VERIFIED' ? THEME.emerald : THEME.warning,
-                        }}>
-                          {p.status}
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => setActiveTxnId(p.transaction_id)}
-                        style={{ padding: '8px 16px', background: THEME.unilusGreen, color: 'white', border: `1px solid ${THEME.emerald}`, borderRadius: '4px', cursor: 'pointer', fontSize: '13px' }}
-                      >
-                        💬 Open Messenger
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {activeTxnId && (
-              <div style={{ border: `1px solid ${THEME.borderGreen}`, padding: '20px', borderRadius: '10px', background: THEME.bgDark, marginTop: '24px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <h4 style={{ margin: 0, color: THEME.emerald, fontSize: '16px' }}>💬 Campus Chat ({activeTxnId.substring(0, 8)}...)</h4>
-                  <span style={{ fontSize: '12px', color: THEME.emerald, fontWeight: 'bold' }}>● Live</span>
-                </div>
-                <div style={{ height: '200px', overflowY: 'auto', border: `1px solid ${THEME.borderGreen}`, padding: '12px', background: THEME.cardBg, borderRadius: '6px', marginBottom: '12px' }}>
-                  {chatMessages.length === 0 ? (
-                    <p style={{ color: THEME.textMuted }}>No messages exchanged yet.</p>
-                  ) : (
-                    chatMessages.map((m) => (
-                      <div key={m.id} style={{
-                        marginBottom: '8px',
-                        padding: '8px 12px',
-                        borderRadius: '8px',
-                        maxWidth: '80%',
-                        background: m.sender_id === (currentUser?.id || currentUser?.user?.id) ? THEME.unilusGreen : 'rgba(255, 255, 255, 0.05)',
-                        marginLeft: m.sender_id === (currentUser?.id || currentUser?.user?.id) ? 'auto' : '0',
-                        color: m.sender_id === (currentUser?.id || currentUser?.user?.id) ? '#fff' : THEME.textMain,
-                      }}>
-                        <span style={{ fontWeight: 'bold', color: m.sender_id === (currentUser?.id || currentUser?.user?.id) ? THEME.goldLight : THEME.emerald, marginRight: '6px' }}>{m.sender_name}:</span>
-                        <span style={{ wordWrap: 'break-word' }}>{m.message_text}</span>
-                      </div>
-                    ))
-                  )}
-                </div>
-                <form onSubmit={handleSendMessage} style={{ display: 'flex', gap: '12px' }}>
-                  <input
-                    type="text"
-                    placeholder="Type message..."
-                    value={newMessageText}
-                    onChange={(e) => setNewMessageText(e.target.value)}
-                    style={{ flex: 1, padding: '12px 16px', background: THEME.bgDark, border: `1px solid ${THEME.borderGreen}`, color: '#fff', borderRadius: '6px', fontSize: '14px' }}
-                  />
-                  <button type="submit" style={{ padding: '12px 24px', background: THEME.unilusGreen, color: 'white', border: `1px solid ${THEME.emerald}`, borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Send</button>
-                </form>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
+
+              <div className="dashboard-section">
+                <h3 className="dashboard-subtitle">My Reserved Purchases</h3>
+                {dashboardData.purchases.length === 0 ? (
+                  <p className="empty-text">No reserved items.</p>
+                ) : (
+                  <div className="purchases-list">
+                    {dashboardData.purchases.map((p) => (
+                      <div key={p.transaction_id} className="purchase-item">
+                        <div className="purchase-info">
+                          <strong>{p.title}</strong>
+                          <span>ZMW {p.total_price}</span>
+                          <span className={`status-badge ${p.status.toLowerCase()}`}>
+                            {p.status}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => setActiveTxnId(p.transaction_id)}
+                          className="chat-btn"
+                        >
+                          💬 Open Messenger
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {activeTxnId && (
+                <div className="chat-container">
+                  <div className="chat-header">
+                    <h4 className="chat-title">💬 Campus Chat ({activeTxnId.substring(0, 8)}...)</h4>
+                    <span className="chat-status">● Live</span>
+                  </div>
+                  <div className="chat-messages">
+                    {chatMessages.length === 0 ? (
+                      <p className="empty-text">No messages exchanged yet.</p>
+                    ) : (
+                      chatMessages.map((m) => (
+                        <div key={m.id} className={`chat-message ${m.sender_id === (currentUser?.id || currentUser?.user?.id) ? 'sent' : 'received'}`}>
+                          <span className="sender-name">{m.sender_name}:</span>
+                          <span className="message-text">{m.message_text}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <form onSubmit={handleSendMessage} className="chat-input-form">
+                    <input
+                      type="text"
+                      placeholder="Type message..."
+                      value={newMessageText}
+                      onChange={(e) => setNewMessageText(e.target.value)}
+                      className="chat-input"
+                    />
+                    <button type="submit" className="chat-send-btn">Send</button>
+                  </form>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

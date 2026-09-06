@@ -300,7 +300,7 @@ const ChatModal = ({ isOpen, onClose, sellerId, sellerName, listingId, listingTi
 };
 
 // ============ LISTING CARD ============
-const ListingCard = ({ item, onOpenChat, currentUser }) => {
+const ListingCard = ({ item, onOpenChat, currentUser, onViewSellerListings }) => {
   const [activeImgIndex, setActiveImgIndex] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
 
@@ -430,9 +430,26 @@ const ListingCard = ({ item, onOpenChat, currentUser }) => {
             Category: <strong style={{ color: '#E2E8F0' }}>{item.category}</strong>
           </p>
 
+          {/* ============ FEATURE 3 - CLICKABLE SELLER NAME ============ */}
           <p style={{ margin: '0 0 5px 0', color: THEME.textMuted, fontSize: '12px' }}>
-            👤 Seller: <strong style={{ color: '#E2E8F0' }}>{item.seller_name || 'UNILUS Student'}</strong>
+            👤 Seller: <strong 
+              style={{ 
+                color: '#E2E8F0', 
+                cursor: 'pointer', 
+                textDecoration: 'underline',
+                textDecorationColor: THEME.emerald,
+                textUnderlineOffset: '2px',
+                transition: 'color 0.2s ease'
+              }}
+              onClick={() => onViewSellerListings(item.seller_id, item.seller_name)}
+              onMouseEnter={(e) => e.target.style.color = THEME.emerald}
+              onMouseLeave={(e) => e.target.style.color = '#E2E8F0'}
+              title="Click to see all listings by this seller"
+            >
+              {item.seller_name || 'UNILUS Student'}
+            </strong>
           </p>
+          {/* ========================================================== */}
 
           <p style={{ margin: '8px 0 0 0', fontSize: '18px', fontWeight: 'bold', color: THEME.emerald }}>
             ZMW {item.price}
@@ -579,6 +596,11 @@ function App() {
     listingTitle: ''
   });
   const [lastMessageCount, setLastMessageCount] = useState(0);
+  
+  // ============ FEATURE 3 - Seller Filter State ============
+  const [sellerFilter, setSellerFilter] = useState(null);
+  const [sellerName, setSellerName] = useState('');
+  // =======================================================
   
   const { toast, showToast } = useToast();
 
@@ -731,6 +753,7 @@ function App() {
     }
   };
 
+  // ============ FEATURE 3 - Filtered Listings with Seller Filter ============
   const filteredListings = useMemo(() => {
     return listings.filter((item) => {
       const term = searchTerm.toLowerCase();
@@ -738,9 +761,36 @@ function App() {
         (item.description && item.description.toLowerCase().includes(term));
       const matchesCategory = selectedCategory === 'All' || item.category === selectedCategory;
       const matchesCampus = selectedCampus === 'All' || item.campus === selectedCampus;
-      return matchesSearch && matchesCategory && matchesCampus;
+      const matchesSeller = sellerFilter ? item.seller_id === sellerFilter : true;
+      
+      return matchesSearch && matchesCategory && matchesCampus && matchesSeller;
     });
-  }, [listings, searchTerm, selectedCategory, selectedCampus]);
+  }, [listings, searchTerm, selectedCategory, selectedCampus, sellerFilter]);
+  // ======================================================================
+
+  // ============ FEATURE 3 - Handle View Seller Listings ============
+  const handleViewSellerListings = (sellerId, sellerName) => {
+    if (!sellerId) {
+      showToast('Seller information not available', 'error');
+      return;
+    }
+    
+    setSellerFilter(sellerId);
+    setSellerName(sellerName || 'Seller');
+    setSearchTerm('');
+    setSelectedCategory('All');
+    setSelectedCampus('All');
+    
+    showToast(`Showing listings by ${sellerName || 'this seller'}`, 'info');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const clearSellerFilter = () => {
+    setSellerFilter(null);
+    setSellerName('');
+    showToast('Showing all listings', 'info');
+  };
+  // ==================================================================
 
   const handleOpenChat = (sellerId, listingId, sellerName, requireLogin = false) => {
     if (requireLogin || !currentUser) {
@@ -911,6 +961,19 @@ function App() {
         {/* Tab Content */}
         {activeTab === 'browse' && (
           <div className="tab-content">
+            {/* ============ FEATURE 3 - Seller Filter Banner ============ */}
+            {sellerFilter && (
+              <div className="seller-filter-banner">
+                <span>
+                  👤 Showing listings by <strong>{sellerName || 'Seller'}</strong>
+                </span>
+                <button className="clear-filter-btn" onClick={clearSellerFilter}>
+                  ✕ Clear Filter
+                </button>
+              </div>
+            )}
+            {/* ======================================================== */}
+
             <div className="search-filters">
               <input
                 type="text"
@@ -950,6 +1013,7 @@ function App() {
                     item={item}
                     onOpenChat={handleOpenChat}
                     currentUser={currentUser}
+                    onViewSellerListings={handleViewSellerListings}
                   />
                 ))
               )}

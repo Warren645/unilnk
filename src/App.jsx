@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import './App.css';
 
-// Dynamic API Base URL
-const API_BASE = window.location.hostname === 'localhost' 
+// ==================== API BASE URL ====================
+const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
   ? 'http://localhost:5000' 
-  : 'https://unilnk-backend-api.onrender.com'; // CHANGE THIS!
+  : 'https://unilnk-backend-api.onrender.com'; // ← CHANGE THIS TO YOUR RENDER URL!
 
 const CATEGORIES = [
   'All',
@@ -20,7 +20,7 @@ const CATEGORIES = [
 
 const CAMPUSES = [
   'Silverest Main Campus',
-  'Leopards Hill Campus',
+  'Pioneer Campus',
   'Mass Media Campus',
 ];
 
@@ -162,7 +162,6 @@ const ChatInbox = ({ currentUser, onOpenChat, API_BASE }) => {
 const ChatModal = ({ isOpen, onClose, sellerId, sellerName, listingId, listingTitle, currentUser, API_BASE }) => {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const { showToast } = useToast();
   const messagesEndRef = useRef(null);
@@ -229,7 +228,6 @@ const ChatModal = ({ isOpen, onClose, sellerId, sellerName, listingId, listingTi
       if (data.success) {
         setNewMessage('');
         fetchMessages();
-        playNotificationSound();
       } else {
         showToast('Failed to send message', 'error');
       }
@@ -238,21 +236,6 @@ const ChatModal = ({ isOpen, onClose, sellerId, sellerName, listingId, listingTi
     } finally {
       setIsSending(false);
     }
-  };
-
-  const playNotificationSound = () => {
-    try {
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-      oscillator.frequency.value = 800;
-      oscillator.type = 'sine';
-      gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
-      oscillator.start(audioContext.currentTime);
-      oscillator.stop(audioContext.currentTime + 0.1);
-    } catch (err) {}
   };
 
   if (!isOpen) return null;
@@ -665,8 +648,9 @@ function App() {
       if (data.success) setListings(data.data);
     } catch (err) {
       console.error('Failed to fetch listings:', err);
+      showToast('Failed to connect to server. Check your connection.', 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const fetchDashboard = useCallback(async () => {
     const userId = currentUser?.id || currentUser?.user?.id;
@@ -739,7 +723,6 @@ function App() {
               icon: '/favicon.ico'
             });
           }
-          // Show toast notification
           showToast(`📩 You have ${data.total_unread} new message(s)`, 'info');
         }
         setLastMessageCount(data.total_unread || 0);
@@ -755,7 +738,7 @@ function App() {
     checkNotifications();
     const interval = setInterval(checkNotifications, 10000);
     return () => clearInterval(interval);
-  }, [currentUser]);
+  }, [currentUser, lastMessageCount, showToast]);
 
   const playNotificationSound = () => {
     try {
@@ -926,25 +909,41 @@ function App() {
         showToast(data.error || 'Failed to create listing', 'error');
       }
     } catch (err) {
-      showToast('Failed to create listing', 'error');
+      showToast('Failed to create listing. Check your connection.', 'error');
     } finally {
       setIsLoading(false);
     }
   };
 
+  // ============ FIXED RESERVE FUNCTION ============
   const handleReserve = async (listingId) => {
+    // Check if user is logged in
     if (!currentUser) {
       showToast('Please log in first to reserve items!', 'error');
       setIsAuthModalOpen(true);
       return;
     }
 
+    // Get user ID properly
     const userId = currentUser.id || currentUser.user?.id;
+    
+    if (!userId) {
+      showToast('User ID not found. Please log out and sign back in.', 'error');
+      return;
+    }
+
+    console.log('🔵 Attempting to reserve item:', { 
+      listingId, 
+      userId, 
+      userEmail: currentUser.email 
+    });
 
     try {
-      const res = await fetch(`${API_BASE}/api/transactions/reserve`, {
+      const response = await fetch(`${API_BASE}/api/transactions/reserve`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
           listing_id: listingId,
           buyer_id: userId,
@@ -952,17 +951,43 @@ function App() {
         }),
       });
 
-      const data = await res.json();
-      if (data.success) {
-        showToast(`Reserved! Transaction ID: ${data.transaction.id.substring(0, 8)}...`, 'success');
-        navigator.clipboard.writeText(data.transaction.id);
+      console.log('📡 Response status:', response.status);
+      
+      // Get raw response
+      const responseText = await response.text();
+      console.log('📝 Raw response:', responseText);
+      
+      // Try to parse JSON
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error('❌ Failed to parse JSON:', parseError);
+        showToast('Server error. Please try again later.', 'error');
+        return;
+      }
+
+      if (response.ok && data.success) {
+        const txnId = data.transaction?.id || 'unknown';
+        showToast(`✅ Reserved! Transaction ID: ${txnId.substring(0, 8)}...`, 'success');
+        
+        // Try to copy to clipboard
+        try {
+          navigator.clipboard.writeText(txnId);
+        } catch (clipError) {
+          console.log('Could not copy to clipboard');
+        }
+        
+        // Refresh data
         fetchListings();
         fetchDashboard();
       } else {
-        showToast(`Reservation failed: ${data.error}`, 'error');
+        const errorMsg = data?.error || 'Unknown error occurred';
+        showToast(`❌ Reservation failed: ${errorMsg}`, 'error');
       }
     } catch (err) {
-      showToast('Failed to connect to backend server.', 'error');
+      console.error('💥 Reserve error:', err);
+      showToast('Failed to connect to backend server. Please check your connection.', 'error');
     }
   };
 

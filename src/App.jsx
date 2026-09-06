@@ -4,7 +4,7 @@ import './App.css';
 // ==================== API BASE URL ====================
 const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
   ? 'http://localhost:5000' 
-  : 'https://unilnk-backend-api.onrender.com'; // ← CHANGE THIS TO YOUR RENDER URL!
+  : 'https://unilnk-backend-api.onrender.com';
 
 const CATEGORIES = [
   'All',
@@ -300,10 +300,9 @@ const ChatModal = ({ isOpen, onClose, sellerId, sellerName, listingId, listingTi
 };
 
 // ============ LISTING CARD ============
-const ListingCard = ({ item, onReserve, onOpenChat, currentUser }) => {
+const ListingCard = ({ item, onOpenChat, currentUser }) => {
   const [activeImgIndex, setActiveImgIndex] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
-  const [isReserving, setIsReserving] = useState(false);
 
   let images = [];
   try {
@@ -315,12 +314,6 @@ const ListingCard = ({ item, onReserve, onOpenChat, currentUser }) => {
   } catch {
     images = [item.image_url];
   }
-
-  const handleReserveClick = async () => {
-    setIsReserving(true);
-    await onReserve(item.id);
-    setIsReserving(false);
-  };
 
   const handleChatClick = () => {
     if (!currentUser) {
@@ -447,36 +440,12 @@ const ListingCard = ({ item, onReserve, onOpenChat, currentUser }) => {
         </div>
       </div>
 
-      <div style={{ padding: '0 15px 15px 15px', display: 'flex', gap: '10px' }}>
-        <button
-          onClick={handleReserveClick}
-          disabled={item.quantity <= 0 || isReserving}
-          style={{
-            flex: 2,
-            padding: '10px',
-            backgroundColor: item.quantity > 0 ? THEME.unilusGreen : '#334155',
-            color: 'white',
-            border: `1px solid ${item.quantity > 0 ? THEME.emerald : '#475569'}`,
-            borderRadius: '6px',
-            fontWeight: 'bold',
-            cursor: item.quantity > 0 ? 'pointer' : 'not-allowed',
-            transition: 'background-color 0.2s ease',
-          }}
-          onMouseOver={(e) => {
-            if (item.quantity > 0) e.target.style.backgroundColor = THEME.unilusDarkGreen;
-          }}
-          onMouseOut={(e) => {
-            if (item.quantity > 0) e.target.style.backgroundColor = THEME.unilusGreen;
-          }}
-        >
-          {isReserving ? 'Processing...' : item.quantity > 0 ? 'Reserve Item' : 'Out of Stock'}
-        </button>
-        
+      <div style={{ padding: '0 15px 15px 15px' }}>
         <button
           onClick={handleChatClick}
           disabled={!currentUser}
           style={{
-            flex: 1,
+            width: '100%',
             padding: '10px',
             backgroundColor: 'transparent',
             color: currentUser ? THEME.goldAccent : THEME.textMuted,
@@ -485,7 +454,6 @@ const ListingCard = ({ item, onReserve, onOpenChat, currentUser }) => {
             fontWeight: 'bold',
             cursor: currentUser ? 'pointer' : 'not-allowed',
             transition: 'all 0.2s ease',
-            minWidth: '100px',
           }}
           title={!currentUser ? 'Please login to chat' : 'Ask seller about this item'}
         >
@@ -618,11 +586,6 @@ function App() {
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedCampus, setSelectedCampus] = useState('All');
 
-  const [dashboardData, setDashboardData] = useState({ purchases: [], sales: [] });
-  const [activeTxnId, setActiveTxnId] = useState(null);
-  const [chatMessages, setChatMessages] = useState([]);
-  const [newMessageText, setNewMessageText] = useState('');
-
   const [sellerListings, setSellerListings] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({ price: '', quantity: '' });
@@ -637,7 +600,6 @@ function App() {
   };
   const [newListing, setNewListing] = useState(initialListingState);
   const [imageFiles, setImageFiles] = useState([]);
-  const [handshakeTxnId, setHandshakeTxnId] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   // Fetch listings
@@ -652,20 +614,6 @@ function App() {
     }
   }, [showToast]);
 
-  const fetchDashboard = useCallback(async () => {
-    const userId = currentUser?.id || currentUser?.user?.id;
-    if (!userId) return;
-    try {
-      const res = await fetch(`${API_BASE}/api/users/${userId}/dashboard`);
-      const data = await res.json();
-      if (data.success) {
-        setDashboardData({ purchases: data.purchases, sales: data.sales });
-      }
-    } catch (err) {
-      console.error('Failed to fetch dashboard:', err);
-    }
-  }, [currentUser]);
-
   const fetchSellerListings = useCallback(async () => {
     const userId = currentUser?.id || currentUser?.user?.id;
     if (!userId) return;
@@ -678,35 +626,17 @@ function App() {
     }
   }, [currentUser]);
 
-  const fetchMessages = useCallback(async (txnId) => {
-    try {
-      const res = await fetch(`${API_BASE}/api/transactions/${txnId}/messages`);
-      const data = await res.json();
-      if (data.success) setChatMessages(data.messages);
-    } catch (err) {
-      console.error('Failed to load messages:', err);
-    }
-  }, []);
-
   useEffect(() => {
     fetchListings();
   }, [fetchListings]);
 
   useEffect(() => {
     if (currentUser) {
-      fetchDashboard();
       fetchSellerListings();
     }
-  }, [currentUser, fetchDashboard, fetchSellerListings]);
+  }, [currentUser, fetchSellerListings]);
 
-  useEffect(() => {
-    if (!activeTxnId) return;
-    fetchMessages(activeTxnId);
-    const interval = setInterval(() => fetchMessages(activeTxnId), 3000);
-    return () => clearInterval(interval);
-  }, [activeTxnId, fetchMessages]);
-
-  // Notification system
+  // Notification system for chat
   useEffect(() => {
     if (!currentUser) return;
     
@@ -764,7 +694,6 @@ function App() {
   const handleLogout = () => {
     localStorage.clear();
     setCurrentUser(null);
-    setActiveTxnId(null);
     showToast('Logged out successfully', 'info');
   };
 
@@ -842,28 +771,6 @@ function App() {
     });
   };
 
-  const handleSendMessage = async (e) => {
-    e.preventDefault();
-    if (!newMessageText.trim() || !activeTxnId) return;
-
-    const userId = currentUser?.id || currentUser?.user?.id;
-
-    try {
-      const res = await fetch(`${API_BASE}/api/transactions/${activeTxnId}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sender_id: userId, message_text: newMessageText }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setNewMessageText('');
-        fetchMessages(activeTxnId);
-      }
-    } catch (err) {
-      showToast('Failed to send message', 'error');
-    }
-  };
-
   const handleCreateListing = async (e) => {
     e.preventDefault();
     if (!currentUser) {
@@ -902,7 +809,6 @@ function App() {
         setNewListing(initialListingState);
         setImageFiles([]);
         fetchListings();
-        fetchDashboard();
         fetchSellerListings();
         setActiveTab('browse');
       } else {
@@ -912,103 +818,6 @@ function App() {
       showToast('Failed to create listing. Check your connection.', 'error');
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  // ============ FIXED RESERVE FUNCTION ============
-  const handleReserve = async (listingId) => {
-    // Check if user is logged in
-    if (!currentUser) {
-      showToast('Please log in first to reserve items!', 'error');
-      setIsAuthModalOpen(true);
-      return;
-    }
-
-    // Get user ID properly
-    const userId = currentUser.id || currentUser.user?.id;
-    
-    if (!userId) {
-      showToast('User ID not found. Please log out and sign back in.', 'error');
-      return;
-    }
-
-    console.log('🔵 Attempting to reserve item:', { 
-      listingId, 
-      userId, 
-      userEmail: currentUser.email 
-    });
-
-    try {
-      const response = await fetch(`${API_BASE}/api/transactions/reserve`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          listing_id: listingId,
-          buyer_id: userId,
-          quantity: 1,
-        }),
-      });
-
-      console.log('📡 Response status:', response.status);
-      
-      // Get raw response
-      const responseText = await response.text();
-      console.log('📝 Raw response:', responseText);
-      
-      // Try to parse JSON
-      let data;
-      try {
-        data = JSON.parse(responseText);
-      } catch (parseError) {
-        console.error('❌ Failed to parse JSON:', parseError);
-        showToast('Server error. Please try again later.', 'error');
-        return;
-      }
-
-      if (response.ok && data.success) {
-        const txnId = data.transaction?.id || 'unknown';
-        showToast(`✅ Reserved! Transaction ID: ${txnId.substring(0, 8)}...`, 'success');
-        
-        // Try to copy to clipboard
-        try {
-          navigator.clipboard.writeText(txnId);
-        } catch (clipError) {
-          console.log('Could not copy to clipboard');
-        }
-        
-        // Refresh data
-        fetchListings();
-        fetchDashboard();
-      } else {
-        const errorMsg = data?.error || 'Unknown error occurred';
-        showToast(`❌ Reservation failed: ${errorMsg}`, 'error');
-      }
-    } catch (err) {
-      console.error('💥 Reserve error:', err);
-      showToast('Failed to connect to backend server. Please check your connection.', 'error');
-    }
-  };
-
-  const handleHandshake = async (e) => {
-    e.preventDefault();
-    try {
-      const res = await fetch(`${API_BASE}/api/transactions/handshake`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transaction_id: handshakeTxnId }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        showToast('Transaction verified successfully!', 'success');
-        setHandshakeTxnId('');
-        fetchDashboard();
-      } else {
-        showToast(data.error, 'error');
-      }
-    } catch (err) {
-      showToast('Verification failed.', 'error');
     }
   };
 
@@ -1075,7 +884,6 @@ function App() {
             <>
               <TabButton tab="messages" label="Messages" icon="💬" />
               <TabButton tab="sell" label="Sell Item" icon="➕" />
-              <TabButton tab="verify" label="Verify Handshake" icon="🤝" />
               <TabButton tab="dashboard" label="My Dashboard" icon="📊" />
             </>
           )}
@@ -1140,7 +948,6 @@ function App() {
                   <ListingCard
                     key={item.id}
                     item={item}
-                    onReserve={handleReserve}
                     onOpenChat={handleOpenChat}
                     currentUser={currentUser}
                   />
@@ -1254,34 +1061,10 @@ function App() {
           </div>
         )}
 
-        {activeTab === 'verify' && (
-          <div className="tab-content">
-            <div className="verify-container">
-              <h2 className="section-title">Handshake Verification</h2>
-              <p className="verify-description">
-                Enter the transaction UUID to complete an in-person exchange on campus.
-              </p>
-              <form onSubmit={handleHandshake} className="verify-form">
-                <input
-                  type="text"
-                  placeholder="Transaction UUID..."
-                  value={handshakeTxnId}
-                  onChange={(e) => setHandshakeTxnId(e.target.value)}
-                  className="verify-input"
-                  required
-                />
-                <button type="submit" className="verify-btn">
-                  Verify Handshake
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
-
         {activeTab === 'dashboard' && currentUser && (
           <div className="tab-content">
             <div className="dashboard-container">
-              <h2 className="section-title">Student Dashboard</h2>
+              <h2 className="section-title">My Dashboard</h2>
 
               <div className="dashboard-section">
                 <h3 className="dashboard-subtitle">My Active Listings</h3>
@@ -1341,64 +1124,6 @@ function App() {
                   </div>
                 )}
               </div>
-
-              <div className="dashboard-section">
-                <h3 className="dashboard-subtitle">My Reserved Purchases</h3>
-                {dashboardData.purchases.length === 0 ? (
-                  <p className="empty-text">No reserved items.</p>
-                ) : (
-                  <div className="purchases-list">
-                    {dashboardData.purchases.map((p) => (
-                      <div key={p.transaction_id} className="purchase-item">
-                        <div className="purchase-info">
-                          <strong>{p.title}</strong>
-                          <span>ZMW {p.total_price}</span>
-                          <span className={`status-badge ${p.status.toLowerCase()}`}>
-                            {p.status}
-                          </span>
-                        </div>
-                        <button
-                          onClick={() => setActiveTxnId(p.transaction_id)}
-                          className="chat-btn"
-                        >
-                          💬 Open Messenger
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {activeTxnId && (
-                <div className="chat-container">
-                  <div className="chat-header">
-                    <h4 className="chat-title">💬 Campus Chat ({activeTxnId.substring(0, 8)}...)</h4>
-                    <span className="chat-status">● Live</span>
-                  </div>
-                  <div className="chat-messages">
-                    {chatMessages.length === 0 ? (
-                      <p className="empty-text">No messages exchanged yet.</p>
-                    ) : (
-                      chatMessages.map((m) => (
-                        <div key={m.id} className={`chat-message ${m.sender_id === (currentUser?.id || currentUser?.user?.id) ? 'sent' : 'received'}`}>
-                          <span className="sender-name">{m.sender_name}:</span>
-                          <span className="message-text">{m.message_text}</span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                  <form onSubmit={handleSendMessage} className="chat-input-form">
-                    <input
-                      type="text"
-                      placeholder="Type message..."
-                      value={newMessageText}
-                      onChange={(e) => setNewMessageText(e.target.value)}
-                      className="chat-input"
-                    />
-                    <button type="submit" className="chat-send-btn">Send</button>
-                  </form>
-                </div>
-              )}
             </div>
           </div>
         )}

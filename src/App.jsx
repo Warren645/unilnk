@@ -1691,18 +1691,15 @@ function App() {
       }
 
       try {
-        const res = await fetch(
-          `${API_BASE}/api/listings`,
-          {
-            method: 'POST',
+        const token = localStorage.getItem('token');
 
-            headers: {
-              ...getAuthHeaders()
-            },
-
-            body: formData
-          }
-        );
+const res = await fetch(`${API_BASE}/api/listings`, {
+  method: 'POST',
+  headers: {
+    Authorization: `Bearer ${token}`
+  },
+  body: formData
+});
 
         const data =
           await res.json();

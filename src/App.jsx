@@ -1,18 +1,19 @@
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import './App.css';
 
 // ==================== API BASE URL ====================
-const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-  ? 'http://localhost:5000' 
-  : 'https://unilnk-backend-api.onrender.com';
+const API_BASE =
+  window.location.hostname === 'localhost' ||
+  window.location.hostname === '127.0.0.1'
+    ? 'http://localhost:5000'
+    : 'https://unilnk-backend-api.onrender.com';
 
 // ==================== AUTH HEADERS ====================
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
 
-  return token
-    ? { Authorization: `Bearer ${token}` }
-    : {};
+  return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
 const CATEGORIES = [
@@ -51,7 +52,7 @@ const THEME = {
   danger: '#EF4444',
 };
 
-// Toast Hook
+// ==================== TOAST HOOK ====================
 const useToast = () => {
   const [toast, setToast] = useState(null);
 
@@ -63,7 +64,7 @@ const useToast = () => {
   return { toast, showToast };
 };
 
-// Toast Component
+// ==================== TOAST COMPONENT ====================
 const Toast = ({ toast }) => {
   if (!toast) return null;
 
@@ -92,22 +93,23 @@ const ChatInbox = ({ currentUser, onOpenChat, API_BASE }) => {
       fetchConversations();
 
       const interval = setInterval(fetchConversations, 5000);
-
       return () => clearInterval(interval);
     }
   }, [currentUser]);
 
   const fetchConversations = async () => {
     const userId = currentUser?.id || currentUser?.user?.id;
-
     if (!userId) return;
 
     try {
-      const res = await fetch(`${API_BASE}/api/chat/conversations/${userId}`, {
-        headers: {
-          ...getAuthHeaders()
+      const res = await fetch(
+        `${API_BASE}/api/chat/conversations/${userId}`,
+        {
+          headers: {
+            ...getAuthHeaders(),
+          },
         }
-      });
+      );
 
       const data = await res.json();
 
@@ -168,17 +170,11 @@ const ChatInbox = ({ currentUser, onOpenChat, API_BASE }) => {
               conv.unread_count > 0 ? 'has-unread' : ''
             }`}
             onClick={() =>
-              onOpenChat(
-                conv.user_id,
-                null,
-                conv.user_name
-              )
+              onOpenChat(conv.user_id, null, conv.user_name)
             }
           >
             <div className="conversation-avatar">
-              <span>
-                {conv.user_name?.charAt(0) || 'U'}
-              </span>
+              <span>{conv.user_name?.charAt(0) || 'U'}</span>
 
               {conv.unread_count > 0 && (
                 <span className="unread-dot">
@@ -206,11 +202,9 @@ const ChatInbox = ({ currentUser, onOpenChat, API_BASE }) => {
             <div className="conversation-time">
               {conv.last_message_time && (
                 <span>
-                  {new Date(
-                    conv.last_message_time
-                  ).toLocaleTimeString([], {
+                  {new Date(conv.last_message_time).toLocaleTimeString([], {
                     hour: '2-digit',
-                    minute: '2-digit'
+                    minute: '2-digit',
                   })}
                 </span>
               )}
@@ -231,14 +225,13 @@ const ChatModal = ({
   listingId,
   listingTitle,
   currentUser,
-  API_BASE
+  API_BASE,
 }) => {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
 
   const { showToast } = useToast();
-
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
@@ -247,7 +240,6 @@ const ChatModal = ({
       markAsRead();
 
       const interval = setInterval(fetchMessages, 3000);
-
       return () => clearInterval(interval);
     }
   }, [isOpen, sellerId, currentUser]);
@@ -258,22 +250,20 @@ const ChatModal = ({
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({
-      behavior: 'smooth'
+      behavior: 'smooth',
     });
   };
 
   const fetchMessages = async () => {
     try {
-      const userId =
-        currentUser?.id ||
-        currentUser?.user?.id;
+      const userId = currentUser?.id || currentUser?.user?.id;
 
       const res = await fetch(
         `${API_BASE}/api/chat/messages/${userId}/${sellerId}`,
         {
           headers: {
-            ...getAuthHeaders()
-          }
+            ...getAuthHeaders(),
+          },
         }
       );
 
@@ -283,68 +273,51 @@ const ChatModal = ({
         setMessages(data.messages || []);
       }
     } catch (err) {
-      console.error(
-        'Failed to fetch messages:',
-        err
-      );
+      console.error('Failed to fetch messages:', err);
     }
   };
 
   const markAsRead = async () => {
     try {
-      const userId =
-        currentUser?.id ||
-        currentUser?.user?.id;
+      const userId = currentUser?.id || currentUser?.user?.id;
 
       await fetch(
         `${API_BASE}/api/chat/mark-read/${userId}/${sellerId}`,
         {
           method: 'PUT',
           headers: {
-            ...getAuthHeaders()
-          }
+            ...getAuthHeaders(),
+          },
         }
       );
     } catch (err) {
-      console.error(
-        'Failed to mark messages as read:',
-        err
-      );
+      console.error('Failed to mark messages as read:', err);
     }
   };
 
   const sendMessage = async (e) => {
     e.preventDefault();
 
-    if (!newMessage.trim() || !currentUser) {
-      return;
-    }
+    if (!newMessage.trim() || !currentUser) return;
 
     setIsSending(true);
 
     try {
-      const userId =
-        currentUser?.id ||
-        currentUser?.user?.id;
+      const userId = currentUser?.id || currentUser?.user?.id;
 
-      const res = await fetch(
-        `${API_BASE}/api/chat/send`,
-        {
-          method: 'POST',
-
-          headers: {
-            'Content-Type': 'application/json',
-            ...getAuthHeaders()
-          },
-
-          body: JSON.stringify({
-            sender_id: userId,
-            receiver_id: sellerId,
-            listing_id: listingId,
-            message: newMessage.trim()
-          })
-        }
-      );
+      const res = await fetch(`${API_BASE}/api/chat/send`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          sender_id: userId,
+          receiver_id: sellerId,
+          listing_id: listingId,
+          message: newMessage.trim(),
+        }),
+      });
 
       const data = await res.json();
 
@@ -352,39 +325,26 @@ const ChatModal = ({
         setNewMessage('');
         fetchMessages();
       } else {
-        showToast(
-          'Failed to send message',
-          'error'
-        );
+        showToast(data.error || 'Failed to send message', 'error');
       }
     } catch (err) {
-      showToast(
-        'Connection error',
-        'error'
-      );
+      showToast('Connection error', 'error');
     } finally {
       setIsSending(false);
     }
   };
 
-  if (!isOpen) {
-    return null;
-  }
+  if (!isOpen) return null;
 
   return (
-    <div
-      className="chat-modal-overlay"
-      onClick={onClose}
-    >
+    <div className="chat-modal-overlay" onClick={onClose}>
       <div
         className="chat-modal-content"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="chat-modal-header">
           <div className="chat-header-info">
-            <h3>
-              💬 Chat with {sellerName || 'Seller'}
-            </h3>
+            <h3>💬 Chat with {sellerName || 'Seller'}</h3>
 
             {listingTitle && (
               <p className="chat-listing-title">
@@ -393,10 +353,7 @@ const ChatModal = ({
             )}
           </div>
 
-          <button
-            className="modal-close-btn"
-            onClick={onClose}
-          >
+          <button className="modal-close-btn" onClick={onClose}>
             ×
           </button>
         </div>
@@ -405,19 +362,13 @@ const ChatModal = ({
           {messages.length === 0 ? (
             <div className="chat-empty">
               <span>💬</span>
-              <p>
-                No messages yet. Start the conversation!
-              </p>
+              <p>No messages yet. Start the conversation!</p>
             </div>
           ) : (
             <>
               {messages.map((msg, index) => {
-                const userId =
-                  currentUser?.id ||
-                  currentUser?.user?.id;
-
-                const isSent =
-                  msg.sender_id === userId;
+                const userId = currentUser?.id || currentUser?.user?.id;
+                const isSent = msg.sender_id === userId;
 
                 return (
                   <div
@@ -436,11 +387,9 @@ const ChatModal = ({
                       </span>
 
                       <span className="message-time">
-                        {new Date(
-                          msg.created_at
-                        ).toLocaleTimeString([], {
+                        {new Date(msg.created_at).toLocaleTimeString([], {
                           hour: '2-digit',
-                          minute: '2-digit'
+                          minute: '2-digit',
                         })}
                       </span>
                     </div>
@@ -453,17 +402,12 @@ const ChatModal = ({
           )}
         </div>
 
-        <form
-          onSubmit={sendMessage}
-          className="chat-input-form"
-        >
+        <form onSubmit={sendMessage} className="chat-input-form">
           <input
             type="text"
             placeholder="Type your message..."
             value={newMessage}
-            onChange={(e) =>
-              setNewMessage(e.target.value)
-            }
+            onChange={(e) => setNewMessage(e.target.value)}
             className="chat-input"
             disabled={isSending}
           />
@@ -486,13 +430,10 @@ const ListingCard = ({
   item,
   onOpenChat,
   currentUser,
-  onViewSellerListings
+  onViewSellerListings,
 }) => {
-  const [activeImgIndex, setActiveImgIndex] =
-    useState(0);
-
-  const [isHovered, setIsHovered] =
-    useState(false);
+  const [activeImgIndex, setActiveImgIndex] = useState(0);
+  const [isHovered, setIsHovered] = useState(false);
 
   let images = [];
 
@@ -510,12 +451,7 @@ const ListingCard = ({
 
   const handleChatClick = () => {
     if (!currentUser) {
-      onOpenChat(
-        null,
-        null,
-        null,
-        true
-      );
+      onOpenChat(null, null, null, true);
       return;
     }
 
@@ -528,20 +464,12 @@ const ListingCard = ({
 
   return (
     <div
-      className={`listing-card ${
-        isHovered ? 'hovered' : ''
-      }`}
-      onMouseEnter={() =>
-        setIsHovered(true)
-      }
-      onMouseLeave={() =>
-        setIsHovered(false)
-      }
+      className={`listing-card ${isHovered ? 'hovered' : ''}`}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       style={{
         border: `1px solid ${
-          isHovered
-            ? THEME.emerald
-            : THEME.borderGreen
+          isHovered ? THEME.emerald : THEME.borderGreen
         }`,
         borderRadius: '12px',
         overflow: 'hidden',
@@ -553,11 +481,8 @@ const ListingCard = ({
         boxShadow: isHovered
           ? '0 12px 24px rgba(0, 77, 37, 0.35)'
           : '0 4px 12px rgba(0, 0, 0, 0.4)',
-        transform: isHovered
-          ? 'translateY(-4px)'
-          : 'translateY(0)',
-        transition:
-          'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)'
+        transform: isHovered ? 'translateY(-4px)' : 'translateY(0)',
+        transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
       }}
     >
       <div>
@@ -569,29 +494,27 @@ const ListingCard = ({
             position: 'relative',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center'
+            justifyContent: 'center',
           }}
         >
-          {images.length > 0 &&
-          images[activeImgIndex] ? (
+          {images.length > 0 && images[activeImgIndex] ? (
             <img
               src={images[activeImgIndex]}
               alt={item.title}
               style={{
                 width: '100%',
                 height: '100%',
-                objectFit: 'cover'
+                objectFit: 'cover',
               }}
               onError={(e) => {
-                e.target.style.display =
-                  'none';
+                e.target.style.display = 'none';
               }}
             />
           ) : (
             <span
               style={{
                 color: THEME.textMuted,
-                fontSize: '13px'
+                fontSize: '13px',
               }}
             >
               No Image Available
@@ -603,45 +526,38 @@ const ListingCard = ({
               position: 'absolute',
               top: '8px',
               left: '8px',
-              backgroundColor:
-                'rgba(11, 19, 32, 0.85)',
+              backgroundColor: 'rgba(11, 19, 32, 0.85)',
               border: `1px solid ${THEME.goldAccent}`,
               color: THEME.goldAccent,
               padding: '2px 8px',
               borderRadius: '10px',
               fontSize: '10px',
               fontWeight: 'bold',
-              backdropFilter: 'blur(4px)'
+              backdropFilter: 'blur(4px)',
             }}
           >
-            📍{' '}
-            {item.campus ||
-              'Silverest Main Campus'}
+            📍 {item.campus || 'Silverest Main Campus'}
           </span>
 
           {images.length > 1 && (
             <>
               <button
                 onClick={() =>
-                  setActiveImgIndex(
-                    (prev) =>
-                      prev === 0
-                        ? images.length - 1
-                        : prev - 1
+                  setActiveImgIndex((prev) =>
+                    prev === 0 ? images.length - 1 : prev - 1
                   )
                 }
                 style={{
                   position: 'absolute',
                   left: '8px',
-                  background:
-                    'rgba(0,0,0,0.7)',
+                  background: 'rgba(0,0,0,0.7)',
                   color: '#fff',
                   border: 'none',
                   borderRadius: '50%',
                   width: '28px',
                   height: '28px',
                   cursor: 'pointer',
-                  fontWeight: 'bold'
+                  fontWeight: 'bold',
                 }}
               >
                 ‹
@@ -649,25 +565,21 @@ const ListingCard = ({
 
               <button
                 onClick={() =>
-                  setActiveImgIndex(
-                    (prev) =>
-                      prev === images.length - 1
-                        ? 0
-                        : prev + 1
+                  setActiveImgIndex((prev) =>
+                    prev === images.length - 1 ? 0 : prev + 1
                   )
                 }
                 style={{
                   position: 'absolute',
                   right: '8px',
-                  background:
-                    'rgba(0,0,0,0.7)',
+                  background: 'rgba(0,0,0,0.7)',
                   color: '#fff',
                   border: 'none',
                   borderRadius: '50%',
                   width: '28px',
                   height: '28px',
                   cursor: 'pointer',
-                  fontWeight: 'bold'
+                  fontWeight: 'bold',
                 }}
               >
                 ›
@@ -678,7 +590,7 @@ const ListingCard = ({
                   position: 'absolute',
                   bottom: '8px',
                   display: 'flex',
-                  gap: '4px'
+                  gap: '4px',
                 }}
               >
                 {images.map((_, idx) => (
@@ -691,7 +603,7 @@ const ListingCard = ({
                       backgroundColor:
                         idx === activeImgIndex
                           ? THEME.emerald
-                          : 'rgba(255,255,255,0.5)'
+                          : 'rgba(255,255,255,0.5)',
                     }}
                   />
                 ))}
@@ -704,10 +616,9 @@ const ListingCard = ({
           <div
             style={{
               display: 'flex',
-              justifyContent:
-                'space-between',
+              justifyContent: 'space-between',
               alignItems: 'flex-start',
-              marginBottom: '8px'
+              marginBottom: '8px',
             }}
           >
             <h3
@@ -715,7 +626,7 @@ const ListingCard = ({
                 margin: 0,
                 fontSize: '16px',
                 color: THEME.textMain,
-                fontWeight: '600'
+                fontWeight: '600',
               }}
             >
               {item.title}
@@ -732,14 +643,12 @@ const ListingCard = ({
                     ? 'rgba(16, 185, 129, 0.15)'
                     : 'rgba(239, 68, 68, 0.15)',
                 color:
-                  item.quantity > 0
-                    ? THEME.emerald
-                    : '#FCA5A5',
+                  item.quantity > 0 ? THEME.emerald : '#FCA5A5',
                 border: `1px solid ${
                   item.quantity > 0
                     ? 'rgba(16, 185, 129, 0.3)'
                     : 'rgba(239, 68, 68, 0.3)'
-                }`
+                }`,
               }}
             >
               {item.quantity > 0
@@ -754,7 +663,7 @@ const ListingCard = ({
                 margin: '0 0 10px 0',
                 color: THEME.textMuted,
                 fontSize: '13px',
-                lineHeight: '1.4'
+                lineHeight: '1.4',
               }}
             >
               {item.description}
@@ -765,25 +674,21 @@ const ListingCard = ({
             style={{
               margin: '0 0 5px 0',
               color: THEME.textMuted,
-              fontSize: '12px'
+              fontSize: '12px',
             }}
           >
             Category:{' '}
-            <strong
-              style={{
-                color: '#E2E8F0'
-              }}
-            >
+            <strong style={{ color: '#E2E8F0' }}>
               {item.category}
             </strong>
           </p>
 
-          {/* ============ FEATURE 3 - CLICKABLE SELLER NAME ============ */}
+          {/* FEATURE 3 - CLICKABLE SELLER NAME */}
           <p
             style={{
               margin: '0 0 5px 0',
               color: THEME.textMuted,
-              fontSize: '12px'
+              fontSize: '12px',
             }}
           >
             👤 Seller:{' '}
@@ -792,41 +697,31 @@ const ListingCard = ({
                 color: '#E2E8F0',
                 cursor: 'pointer',
                 textDecoration: 'underline',
-                textDecorationColor:
-                  THEME.emerald,
+                textDecorationColor: THEME.emerald,
                 textUnderlineOffset: '2px',
-                transition:
-                  'color 0.2s ease'
+                transition: 'color 0.2s ease',
               }}
               onClick={() =>
-                onViewSellerListings(
-                  item.seller_id,
-                  item.seller_name
-                )
+                onViewSellerListings(item.seller_id, item.seller_name)
               }
               onMouseEnter={(e) =>
-                (e.target.style.color =
-                  THEME.emerald)
+                (e.target.style.color = THEME.emerald)
               }
               onMouseLeave={(e) =>
-                (e.target.style.color =
-                  '#E2E8F0')
+                (e.target.style.color = '#E2E8F0')
               }
               title="Click to see all listings by this seller"
             >
-              {item.seller_name ||
-                'UNILUS Student'}
+              {item.seller_name || 'UNILUS Student'}
             </strong>
           </p>
-
-          {/* ========================================================== */}
 
           <p
             style={{
               margin: '8px 0 0 0',
               fontSize: '18px',
               fontWeight: 'bold',
-              color: THEME.emerald
+              color: THEME.emerald,
             }}
           >
             ZMW {item.price}
@@ -834,11 +729,7 @@ const ListingCard = ({
         </div>
       </div>
 
-      <div
-        style={{
-          padding: '0 15px 15px 15px'
-        }}
-      >
+      <div style={{ padding: '0 15px 15px 15px' }}>
         <button
           onClick={handleChatClick}
           disabled={!currentUser}
@@ -846,21 +737,14 @@ const ListingCard = ({
             width: '100%',
             padding: '10px',
             backgroundColor: 'transparent',
-            color: currentUser
-              ? THEME.goldAccent
-              : THEME.textMuted,
+            color: currentUser ? THEME.goldAccent : THEME.textMuted,
             border: `1px solid ${
-              currentUser
-                ? THEME.goldAccent
-                : '#475569'
+              currentUser ? THEME.goldAccent : '#475569'
             }`,
             borderRadius: '6px',
             fontWeight: 'bold',
-            cursor: currentUser
-              ? 'pointer'
-              : 'not-allowed',
-            transition:
-              'all 0.2s ease'
+            cursor: currentUser ? 'pointer' : 'not-allowed',
+            transition: 'all 0.2s ease',
           }}
           title={
             !currentUser
@@ -876,29 +760,21 @@ const ListingCard = ({
 };
 
 // ============ AUTH MODAL ============
-const AuthModal = ({
-  isOpen,
-  onClose,
-  onAuthSuccess
-}) => {
-  const [isRegister, setIsRegister] =
-    useState(false);
+const AuthModal = ({ isOpen, onClose, onAuthSuccess }) => {
+  const [isRegister, setIsRegister] = useState(false);
 
   const [authData, setAuthData] = useState({
     full_name: '',
     email: '',
     password: '',
-    student_id: ''
+    student_id: '',
   });
 
-  const [isLoading, setIsLoading] =
-    useState(false);
-
+  const [isLoading, setIsLoading] = useState(false);
   const { showToast } = useToast();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-
     setIsLoading(true);
 
     const endpoint = isRegister
@@ -906,16 +782,13 @@ const AuthModal = ({
       : '/api/auth/login';
 
     try {
-      const res = await fetch(
-        `${API_BASE}${endpoint}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(authData)
-        }
-      );
+      const res = await fetch(`${API_BASE}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(authData),
+      });
 
       const data = await res.json();
 
@@ -925,80 +798,46 @@ const AuthModal = ({
             'Registration successful! Please sign in.',
             'success'
           );
-
           setIsRegister(false);
         } else {
-          localStorage.setItem(
-            'user',
-            JSON.stringify(data.user)
-          );
-
-          localStorage.setItem(
-            'token',
-            data.token
-          );
+          localStorage.setItem('user', JSON.stringify(data.user));
+          localStorage.setItem('token', data.token);
 
           onAuthSuccess(data.user);
 
           showToast(
-            `Welcome, ${
-              data.user.full_name ||
-              data.user.email
-            }!`,
+            `Welcome, ${data.user.full_name || data.user.email}!`,
             'success'
           );
 
           onClose();
         }
       } else {
-        showToast(
-          data.error ||
-            'Authentication failed',
-          'error'
-        );
+        showToast(data.error || 'Authentication failed', 'error');
       }
     } catch (err) {
-      showToast(
-        'Connection error. Please try again.',
-        'error'
-      );
+      showToast('Connection error. Please try again.', 'error');
     } finally {
       setIsLoading(false);
     }
   };
 
-  if (!isOpen) {
-    return null;
-  }
+  if (!isOpen) return null;
 
   return (
-    <div
-      className="modal-overlay"
-      onClick={onClose}
-    >
+    <div className="modal-overlay" onClick={onClose}>
       <div
         className="modal-content"
-        onClick={(e) =>
-          e.stopPropagation()
-        }
+        onClick={(e) => e.stopPropagation()}
       >
-        <button
-          className="modal-close"
-          onClick={onClose}
-        >
+        <button className="modal-close" onClick={onClose}>
           ×
         </button>
 
         <div className="auth-header">
-          <div className="auth-logo">
-            U
-          </div>
+          <div className="auth-logo">U</div>
 
-          <h2>
-            {isRegister
-              ? 'Create Account'
-              : 'Welcome Back'}
-          </h2>
+          <h2>{isRegister ? 'Create Account' : 'Welcome Back'}</h2>
 
           <p>
             {isRegister
@@ -1007,10 +846,7 @@ const AuthModal = ({
           </p>
         </div>
 
-        <form
-          onSubmit={handleSubmit}
-          className="auth-form"
-        >
+        <form onSubmit={handleSubmit} className="auth-form">
           {isRegister && (
             <>
               <input
@@ -1021,8 +857,7 @@ const AuthModal = ({
                 onChange={(e) =>
                   setAuthData({
                     ...authData,
-                    full_name:
-                      e.target.value
+                    full_name: e.target.value,
                   })
                 }
               />
@@ -1035,8 +870,7 @@ const AuthModal = ({
                 onChange={(e) =>
                   setAuthData({
                     ...authData,
-                    student_id:
-                      e.target.value
+                    student_id: e.target.value,
                   })
                 }
               />
@@ -1051,7 +885,7 @@ const AuthModal = ({
             onChange={(e) =>
               setAuthData({
                 ...authData,
-                email: e.target.value
+                email: e.target.value,
               })
             }
           />
@@ -1064,7 +898,7 @@ const AuthModal = ({
             onChange={(e) =>
               setAuthData({
                 ...authData,
-                password: e.target.value
+                password: e.target.value,
               })
             }
           />
@@ -1084,9 +918,7 @@ const AuthModal = ({
 
         <p
           className="auth-toggle"
-          onClick={() =>
-            setIsRegister(!isRegister)
-          }
+          onClick={() => setIsRegister(!isRegister)}
         >
           {isRegister
             ? 'Already have an account? Sign in'
@@ -1099,64 +931,41 @@ const AuthModal = ({
 
 // ============ MAIN APP ============
 function App() {
-  const [listings, setListings] =
-    useState([]);
+  const [listings, setListings] = useState([]);
 
-  const [currentUser, setCurrentUser] =
-    useState(
-      JSON.parse(
-        localStorage.getItem('user')
-      ) || null
-    );
+  const [currentUser, setCurrentUser] = useState(
+    JSON.parse(localStorage.getItem('user')) || null
+  );
 
-  const [activeTab, setActiveTab] =
-    useState('browse');
+  const [activeTab, setActiveTab] = useState('browse');
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
-  const [isAuthModalOpen, setIsAuthModalOpen] =
-    useState(false);
+  const [chatModal, setChatModal] = useState({
+    isOpen: false,
+    sellerId: null,
+    listingId: null,
+    listingTitle: '',
+  });
 
-  const [chatModal, setChatModal] =
-    useState({
-      isOpen: false,
-      sellerId: null,
-      listingId: null,
-      listingTitle: ''
-    });
+  const [lastMessageCount, setLastMessageCount] = useState(0);
 
-  const [lastMessageCount, setLastMessageCount] =
-    useState(0);
+  // FEATURE 3 - Seller Filter State
+  const [sellerFilter, setSellerFilter] = useState(null);
+  const [sellerName, setSellerName] = useState('');
 
-  // ============ FEATURE 3 - Seller Filter State ============
-  const [sellerFilter, setSellerFilter] =
-    useState(null);
+  const { toast, showToast } = useToast();
 
-  const [sellerName, setSellerName] =
-    useState('');
-  // =======================================================
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [selectedCampus, setSelectedCampus] = useState('All');
 
-  const { toast, showToast } =
-    useToast();
+  const [sellerListings, setSellerListings] = useState([]);
+  const [editingId, setEditingId] = useState(null);
 
-  const [searchTerm, setSearchTerm] =
-    useState('');
-
-  const [selectedCategory, setSelectedCategory] =
-    useState('All');
-
-  const [selectedCampus, setSelectedCampus] =
-    useState('All');
-
-  const [sellerListings, setSellerListings] =
-    useState([]);
-
-  const [editingId, setEditingId] =
-    useState(null);
-
-  const [editForm, setEditForm] =
-    useState({
-      price: '',
-      quantity: ''
-    });
+  const [editForm, setEditForm] = useState({
+    price: '',
+    quantity: '',
+  });
 
   const initialListingState = {
     title: '',
@@ -1164,76 +973,61 @@ function App() {
     price: '',
     quantity: 1,
     category: 'Clothing & Apparel',
-    campus: CAMPUSES[0]
+    campus: CAMPUSES[0],
   };
 
-  const [newListing, setNewListing] =
-    useState(initialListingState);
+  const [newListing, setNewListing] = useState(initialListingState);
+  const [imageFiles, setImageFiles] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const [imageFiles, setImageFiles] =
-    useState([]);
+  // ==================== FETCH PUBLIC LISTINGS ====================
+  const fetchListings = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/listings`);
+      const data = await res.json();
 
-  const [isLoading, setIsLoading] =
-    useState(false);
+      if (data.success) {
+        setListings(data.data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch listings:', err);
 
-  // Fetch listings
-  const fetchListings =
-    useCallback(async () => {
-      try {
-        const res = await fetch(
-          `${API_BASE}/api/listings`
-        );
+      showToast(
+        'Failed to connect to server. Check your connection.',
+        'error'
+      );
+    }
+  }, [showToast]);
 
-        const data = await res.json();
+  // ==================== FETCH SELLER LISTINGS ====================
+  const fetchSellerListings = useCallback(async () => {
+    const userId = currentUser?.id || currentUser?.user?.id;
+    if (!userId) return;
 
-        if (data.success) {
-          setListings(data.data);
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/users/${userId}/listings`,
+        {
+          headers: {
+            ...getAuthHeaders(),
+          },
         }
-      } catch (err) {
-        console.error(
-          'Failed to fetch listings:',
-          err
-        );
+      );
 
+      const data = await res.json();
+
+      if (data.success) {
+        setSellerListings(data.listings);
+      } else {
         showToast(
-          'Failed to connect to server. Check your connection.',
+          data.error || 'Failed to load your listings.',
           'error'
         );
       }
-    }, [showToast]);
-
-  const fetchSellerListings =
-    useCallback(async () => {
-      const userId =
-        currentUser?.id ||
-        currentUser?.user?.id;
-
-      if (!userId) return;
-
-      try {
-        const res = await fetch(
-          `${API_BASE}/api/users/${userId}/listings`,
-          {
-            headers: {
-              ...getAuthHeaders()
-            }
-          }
-        );
-
-        const data = await res.json();
-
-        if (data.success) {
-          setSellerListings(
-            data.listings
-          );
-        }
-      } catch (err) {
-        console.error(
-          'Failed to load seller listings:',
-          err
-        );
-      }
-    }, [currentUser]);
+    } catch (err) {
+      console.error('Failed to load seller listings:', err);
+    }
+  }, [currentUser, showToast]);
 
   useEffect(() => {
     fetchListings();
@@ -1242,136 +1036,98 @@ function App() {
   useEffect(() => {
     if (currentUser) {
       fetchSellerListings();
+    } else {
+      setSellerListings([]);
     }
   }, [currentUser, fetchSellerListings]);
 
-  // Notification system for chat
+  // ==================== CHAT NOTIFICATIONS ====================
   useEffect(() => {
     if (!currentUser) return;
 
-    const checkNotifications =
-      async () => {
-        const userId =
-          currentUser?.id ||
-          currentUser?.user?.id;
+    const checkNotifications = async () => {
+      const userId = currentUser?.id || currentUser?.user?.id;
 
-        try {
-          const res = await fetch(
-            `${API_BASE}/api/chat/unread/total/${userId}`,
-            {
-              headers: {
-                ...getAuthHeaders()
-              }
-            }
-          );
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/chat/unread/total/${userId}`,
+          {
+            headers: {
+              ...getAuthHeaders(),
+            },
+          }
+        );
 
-          const data = await res.json();
+        const data = await res.json();
+
+        if (
+          data.success &&
+          data.total_unread > lastMessageCount
+        ) {
+          playNotificationSound();
 
           if (
-            data.success &&
-            data.total_unread >
-              lastMessageCount
+            'Notification' in window &&
+            Notification.permission === 'granted'
           ) {
-            playNotificationSound();
-
-            if (
-              'Notification' in window &&
-              Notification.permission ===
-                'granted'
-            ) {
-              new Notification(
-                '📩 New Message on UniLnk',
-                {
-                  body: `You have ${data.total_unread} unread message(s)`,
-                  icon: '/favicon.ico'
-                }
-              );
-            }
-
-            showToast(
-              `📩 You have ${data.total_unread} new message(s)`,
-              'info'
-            );
+            new Notification('📩 New Message on UniLnk', {
+              body: `You have ${data.total_unread} unread message(s)`,
+              icon: '/favicon.ico',
+            });
           }
 
-          setLastMessageCount(
-            data.total_unread || 0
-          );
-        } catch (err) {
-          console.error(
-            'Failed to check notifications:',
-            err
+          showToast(
+            `📩 You have ${data.total_unread} new message(s)`,
+            'info'
           );
         }
-      };
+
+        setLastMessageCount(data.total_unread || 0);
+      } catch (err) {
+        console.error('Failed to check notifications:', err);
+      }
+    };
 
     if (
       'Notification' in window &&
-      Notification.permission ===
-        'default'
+      Notification.permission === 'default'
     ) {
       Notification.requestPermission();
     }
 
     checkNotifications();
 
-    const interval = setInterval(
-      checkNotifications,
-      10000
-    );
-
-    return () =>
-      clearInterval(interval);
-  }, [
-    currentUser,
-    lastMessageCount,
-    showToast
-  ]);
+    const interval = setInterval(checkNotifications, 10000);
+    return () => clearInterval(interval);
+  }, [currentUser, lastMessageCount, showToast]);
 
   const playNotificationSound = () => {
     try {
-      const audioContext =
-        new (
-          window.AudioContext ||
-          window.webkitAudioContext
-        )();
+      const audioContext = new (
+        window.AudioContext || window.webkitAudioContext
+      )();
 
-      [800, 1000, 1200].forEach(
-        (freq, i) => {
-          const osc =
-            audioContext.createOscillator();
+      [800, 1000, 1200].forEach((freq, i) => {
+        const osc = audioContext.createOscillator();
+        const gain = audioContext.createGain();
 
-          const gain =
-            audioContext.createGain();
+        osc.connect(gain);
+        gain.connect(audioContext.destination);
 
-          osc.connect(gain);
+        osc.frequency.value = freq;
+        osc.type = 'sine';
 
-          gain.connect(
-            audioContext.destination
-          );
+        gain.gain.setValueAtTime(
+          0.08,
+          audioContext.currentTime + i * 0.1
+        );
 
-          osc.frequency.value = freq;
-          osc.type = 'sine';
-
-          gain.gain.setValueAtTime(
-            0.08,
-            audioContext.currentTime +
-              i * 0.1
-          );
-
-          osc.start(
-            audioContext.currentTime +
-              i * 0.1
-          );
-
-          osc.stop(
-            audioContext.currentTime +
-              i * 0.1 +
-              0.08
-          );
-        }
-      );
-    } catch (err) {}
+        osc.start(audioContext.currentTime + i * 0.1);
+        osc.stop(audioContext.currentTime + i * 0.1 + 0.08);
+      });
+    } catch (err) {
+      // Notification sound is optional.
+    }
   };
 
   const handleAuthSuccess = (user) => {
@@ -1379,179 +1135,215 @@ function App() {
   };
 
   const handleLogout = () => {
-    localStorage.clear();
+    localStorage.removeItem('user');
+    localStorage.removeItem('token');
 
     setCurrentUser(null);
+    setSellerListings([]);
+    setEditingId(null);
 
-    showToast(
-      'Logged out successfully',
-      'info'
-    );
+    showToast('Logged out successfully', 'info');
   };
 
-  const handleDeleteListing =
-    async (listingId) => {
-      if (
-        !window.confirm(
-          'Are you sure you want to delete this listing?'
-        )
-      ) {
+  // ==================== DELETE LISTING ====================
+  const handleDeleteListing = async (listingId) => {
+    if (
+      !window.confirm(
+        'Are you sure you want to delete this listing?'
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/listings/${listingId}`,
+        {
+          method: 'DELETE',
+          headers: {
+            ...getAuthHeaders(),
+          },
+        }
+      );
+
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        showToast('Listing removed successfully.', 'info');
+
+        if (editingId === listingId) {
+          setEditingId(null);
+        }
+
+        await Promise.all([
+          fetchSellerListings(),
+          fetchListings(),
+        ]);
+      } else {
+        showToast(
+          data.error || 'Failed to delete listing.',
+          'error'
+        );
+      }
+    } catch (err) {
+      console.error('Failed to delete listing:', err);
+      showToast('Failed to delete listing.', 'error');
+    }
+  };
+
+  // ==================== MARK LISTING AS SOLD ====================
+  const handleMarkAsSold = async (listingId) => {
+    const confirmed = window.confirm(
+      'Are you sure you want to mark this item as sold? It will be removed from the marketplace and automatically deleted after 5 days.'
+    );
+
+    if (!confirmed) return;
+
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/listings/${listingId}/sold`,
+        {
+          method: 'PUT',
+          headers: {
+            ...getAuthHeaders(),
+          },
+        }
+      );
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        showToast(
+          data.error || 'Failed to mark listing as sold.',
+          'error'
+        );
         return;
       }
 
-      try {
-        const res = await fetch(
-          `${API_BASE}/api/listings/${listingId}`,
-          {
-            method: 'DELETE',
-            headers: {
-              ...getAuthHeaders()
-            }
-          }
-        );
+      // Close editing if necessary.
+      setEditingId(null);
 
-        const data = await res.json();
-
-        if (data.success) {
-          showToast(
-            'Listing removed successfully.',
-            'info'
-          );
-
-          fetchSellerListings();
-          fetchListings();
-        }
-      } catch (err) {
-        showToast(
-          'Failed to delete listing',
-          'error'
-        );
-      }
-    };
-
-  const handleUpdateListing =
-    async (listingId) => {
-      try {
-        const res = await fetch(
-          `${API_BASE}/api/listings/${listingId}`,
-          {
-            method: 'PUT',
-
-            headers: {
-              'Content-Type':
-                'application/json',
-              ...getAuthHeaders()
-            },
-
-            body: JSON.stringify(
-              editForm
-            )
-          }
-        );
-
-        const data = await res.json();
-
-        if (data.success) {
-          showToast(
-            'Listing updated successfully!'
-          );
-
-          setEditingId(null);
-
-          fetchSellerListings();
-          fetchListings();
-        }
-      } catch (err) {
-        showToast(
-          'Failed to update listing',
-          'error'
-        );
-      }
-    };
-
-  // ============ FEATURE 3 - Filtered Listings with Seller Filter ============
-  const filteredListings =
-    useMemo(() => {
-      return listings.filter((item) => {
-        const term =
-          searchTerm.toLowerCase();
-
-        const matchesSearch =
-          item.title
-            .toLowerCase()
-            .includes(term) ||
-          (
-            item.description &&
-            item.description
-              .toLowerCase()
-              .includes(term)
-          );
-
-        const matchesCategory =
-          selectedCategory === 'All' ||
-          item.category ===
-            selectedCategory;
-
-        const matchesCampus =
-          selectedCampus === 'All' ||
-          item.campus ===
-            selectedCampus;
-
-        const matchesSeller =
-          sellerFilter
-            ? item.seller_id ===
-              sellerFilter
-            : true;
-
-        return (
-          matchesSearch &&
-          matchesCategory &&
-          matchesCampus &&
-          matchesSeller
-        );
-      });
-    }, [
-      listings,
-      searchTerm,
-      selectedCategory,
-      selectedCampus,
-      sellerFilter
-    ]);
-  // ======================================================================
-
-  // ============ FEATURE 3 - Handle View Seller Listings ============
-  const handleViewSellerListings = (
-    sellerId,
-    sellerName
-  ) => {
-    if (!sellerId) {
       showToast(
-        'Seller information not available',
-        'error'
+        'Listing marked as sold successfully!',
+        'success'
       );
 
+      // Refresh the public marketplace and seller dashboard.
+      await Promise.all([
+        fetchListings(),
+        fetchSellerListings(),
+      ]);
+    } catch (err) {
+      console.error('Error marking listing as sold:', err);
+
+      showToast(
+        'Failed to mark listing as sold. Check your connection.',
+        'error'
+      );
+    }
+  };
+
+  // ==================== UPDATE LISTING ====================
+  const handleUpdateListing = async (listingId) => {
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/listings/${listingId}`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders(),
+          },
+          body: JSON.stringify(editForm),
+        }
+      );
+
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        showToast('Listing updated successfully!');
+
+        setEditingId(null);
+
+        await Promise.all([
+          fetchSellerListings(),
+          fetchListings(),
+        ]);
+      } else {
+        showToast(
+          data.error || 'Failed to update listing.',
+          'error'
+        );
+      }
+    } catch (err) {
+      console.error('Failed to update listing:', err);
+      showToast('Failed to update listing.', 'error');
+    }
+  };
+
+  // ==================== FILTER PUBLIC LISTINGS ====================
+  const filteredListings = useMemo(() => {
+    return listings.filter((item) => {
+      // Never display sold listings in the public marketplace.
+      if (item.is_sold === true) {
+        return false;
+      }
+
+      const term = searchTerm.toLowerCase();
+
+      const matchesSearch =
+        (item.title || '').toLowerCase().includes(term) ||
+        (item.description || '').toLowerCase().includes(term);
+
+      const matchesCategory =
+        selectedCategory === 'All' ||
+        item.category === selectedCategory;
+
+      const matchesCampus =
+        selectedCampus === 'All' ||
+        item.campus === selectedCampus;
+
+      const matchesSeller = sellerFilter
+        ? String(item.seller_id) === String(sellerFilter)
+        : true;
+
+      return (
+        matchesSearch &&
+        matchesCategory &&
+        matchesCampus &&
+        matchesSeller
+      );
+    });
+  }, [
+    listings,
+    searchTerm,
+    selectedCategory,
+    selectedCampus,
+    sellerFilter,
+  ]);
+
+  // ==================== VIEW SELLER LISTINGS ====================
+  const handleViewSellerListings = (sellerId, sellerName) => {
+    if (!sellerId) {
+      showToast('Seller information not available', 'error');
       return;
     }
 
     setSellerFilter(sellerId);
-    setSellerName(
-      sellerName || 'Seller'
-    );
+    setSellerName(sellerName || 'Seller');
 
     setSearchTerm('');
     setSelectedCategory('All');
     setSelectedCampus('All');
 
     showToast(
-      `Showing listings by ${
-        sellerName || 'this seller'
-      }`,
+      `Showing listings by ${sellerName || 'this seller'}`,
       'info'
     );
 
     window.scrollTo({
       top: 0,
-      behavior: 'smooth'
+      behavior: 'smooth',
     });
   };
 
@@ -1559,23 +1351,17 @@ function App() {
     setSellerFilter(null);
     setSellerName('');
 
-    showToast(
-      'Showing all listings',
-      'info'
-    );
+    showToast('Showing all listings', 'info');
   };
-  // ==================================================================
 
+  // ==================== OPEN CHAT ====================
   const handleOpenChat = (
     sellerId,
     listingId,
     sellerName,
     requireLogin = false
   ) => {
-    if (
-      requireLogin ||
-      !currentUser
-    ) {
+    if (requireLogin || !currentUser) {
       setIsAuthModalOpen(true);
 
       showToast(
@@ -1587,20 +1373,15 @@ function App() {
     }
 
     if (!sellerId) {
-      showToast(
-        'Seller information not available',
-        'error'
-      );
-
+      showToast('Seller information not available', 'error');
       return;
     }
 
     setChatModal({
       isOpen: true,
-      sellerId: sellerId,
-      listingId: listingId,
-      listingTitle:
-        sellerName || 'Seller'
+      sellerId,
+      listingId,
+      listingTitle: sellerName || 'Seller',
     });
   };
 
@@ -1609,169 +1390,128 @@ function App() {
       isOpen: false,
       sellerId: null,
       listingId: null,
-      listingTitle: ''
+      listingTitle: '',
     });
   };
 
-  const handleCreateListing =
-    async (e) => {
-      e.preventDefault();
+  // ==================== CREATE LISTING ====================
+  const handleCreateListing = async (e) => {
+    e.preventDefault();
 
-      if (!currentUser) {
+    if (!currentUser) {
+      showToast('Please log in first.', 'error');
+      return;
+    }
+
+    const sellerId = currentUser.id || currentUser.user?.id;
+
+    if (!sellerId) {
+      showToast(
+        'Session issue. Please log out and sign back in.',
+        'error'
+      );
+      return;
+    }
+
+    if (imageFiles.length > 5) {
+      showToast('You can upload a maximum of 5 images.', 'error');
+      return;
+    }
+
+    if (
+      imageFiles.some((file) => file.size > 5 * 1024 * 1024)
+    ) {
+      showToast(
+        'Each image must be 5MB or smaller.',
+        'error'
+      );
+      return;
+    }
+
+    setIsLoading(true);
+
+    const formData = new FormData();
+
+    formData.append('title', newListing.title);
+    formData.append('description', newListing.description);
+    formData.append('price', newListing.price);
+    formData.append('quantity', newListing.quantity);
+    formData.append('category', newListing.category);
+    formData.append('campus', newListing.campus);
+    formData.append('seller_id', sellerId);
+
+    for (let i = 0; i < imageFiles.length; i++) {
+      formData.append('images', imageFiles[i]);
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+
+      const res = await fetch(`${API_BASE}/api/listings`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
+      });
+
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        showToast('Listing created successfully!');
+
+        setNewListing(initialListingState);
+        setImageFiles([]);
+
+        // Clear the file input after successful submission.
+        const fileInput = document.getElementById('listing-images');
+        if (fileInput) fileInput.value = '';
+
+        await Promise.all([
+          fetchListings(),
+          fetchSellerListings(),
+        ]);
+
+        setActiveTab('browse');
+      } else {
         showToast(
-          'Please log in first.',
+          data.error || 'Failed to create listing',
           'error'
         );
-
-        return;
       }
+    } catch (err) {
+      console.error('Failed to create listing:', err);
 
-      const sellerId =
-        currentUser.id ||
-        currentUser.user?.id;
-
-      if (!sellerId) {
-        showToast(
-          'Session issue. Please log out and sign back in.',
-          'error'
-        );
-
-        return;
-      }
-
-      setIsLoading(true);
-
-      const formData =
-        new FormData();
-
-      formData.append(
-        'title',
-        newListing.title
+      showToast(
+        'Failed to create listing. Check your connection.',
+        'error'
       );
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-      formData.append(
-        'description',
-        newListing.description
-      );
-
-      formData.append(
-        'price',
-        newListing.price
-      );
-
-      formData.append(
-        'quantity',
-        newListing.quantity
-      );
-
-      formData.append(
-        'category',
-        newListing.category
-      );
-
-      formData.append(
-        'campus',
-        newListing.campus
-      );
-
-      formData.append(
-        'seller_id',
-        sellerId
-      );
-
-      for (
-        let i = 0;
-        i < imageFiles.length;
-        i++
-      ) {
-        formData.append(
-          'images',
-          imageFiles[i]
-        );
-      }
-
-      try {
-        const token = localStorage.getItem('token');
-
-const res = await fetch(`${API_BASE}/api/listings`, {
-  method: 'POST',
-  headers: {
-    Authorization: `Bearer ${token}`
-  },
-  body: formData
-});
-
-        const data =
-          await res.json();
-
-        if (data.success) {
-          showToast(
-            'Listing created successfully!'
-          );
-
-          setNewListing(
-            initialListingState
-          );
-
-          setImageFiles([]);
-
-          fetchListings();
-          fetchSellerListings();
-
-          setActiveTab('browse');
-        } else {
-          showToast(
-            data.error ||
-              'Failed to create listing',
-            'error'
-          );
-        }
-      } catch (err) {
-        showToast(
-          'Failed to create listing. Check your connection.',
-          'error'
-        );
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-  const TabButton = ({
-    tab,
-    label,
-    icon
-  }) => (
+  // ==================== NAVIGATION TAB BUTTON ====================
+  const TabButton = ({ tab, label, icon }) => (
     <button
-      className={`tab-btn ${
-        activeTab === tab
-          ? 'active'
-          : ''
-      }`}
-      onClick={() =>
-        setActiveTab(tab)
-      }
+      className={`tab-btn ${activeTab === tab ? 'active' : ''}`}
+      onClick={() => setActiveTab(tab)}
     >
-      {icon && (
-        <span className="tab-icon">
-          {icon}
-        </span>
-      )}
-
+      {icon && <span className="tab-icon">{icon}</span>}
       {label}
     </button>
   );
 
+  // ==================== MAIN UI ====================
   return (
     <div className="app-container">
       <div className="accent-bar" />
 
       <div className="app-content">
-        {/* Header */}
+        {/* HEADER */}
         <header className="app-header">
           <div className="header-left">
-            <div className="unilus-crest">
-              U
-            </div>
+            <div className="unilus-crest">U</div>
 
             <div>
               <h1 className="header-title">
@@ -1790,37 +1530,28 @@ const res = await fetch(`${API_BASE}/api/listings`, {
           <div className="header-right">
             <div className="status-indicator">
               <span className="status-dot" />
-
-              <span className="status-text">
-                Campus Network
-              </span>
+              <span className="status-text">Campus Network</span>
             </div>
           </div>
         </header>
 
         <Toast toast={toast} />
 
-        {/* Auth / User Session */}
+        {/* AUTH / USER SESSION */}
         {!currentUser ? (
           <div className="auth-prompt">
             <button
               className="auth-prompt-btn"
-              onClick={() =>
-                setIsAuthModalOpen(true)
-              }
+              onClick={() => setIsAuthModalOpen(true)}
             >
               Student Sign In
             </button>
 
-            <span className="auth-prompt-text">
-              or
-            </span>
+            <span className="auth-prompt-text">or</span>
 
             <button
               className="auth-prompt-btn secondary"
-              onClick={() =>
-                setIsAuthModalOpen(true)
-              }
+              onClick={() => setIsAuthModalOpen(true)}
             >
               Create Account
             </button>
@@ -1830,21 +1561,17 @@ const res = await fetch(`${API_BASE}/api/listings`, {
             <span className="session-text">
               Active Session:{' '}
               <strong>
-                {currentUser.full_name ||
-                  currentUser.email}
+                {currentUser.full_name || currentUser.email}
               </strong>
             </span>
 
-            <button
-              className="logout-btn"
-              onClick={handleLogout}
-            >
+            <button className="logout-btn" onClick={handleLogout}>
               Log Out
             </button>
           </div>
         )}
 
-        {/* Navigation Tabs */}
+        {/* NAVIGATION TABS */}
         <nav className="tab-nav">
           <TabButton
             tab="browse"
@@ -1875,167 +1602,117 @@ const res = await fetch(`${API_BASE}/api/listings`, {
           )}
         </nav>
 
-        {/* Auth Modal */}
+        {/* AUTH MODAL */}
         <AuthModal
           isOpen={isAuthModalOpen}
-          onClose={() =>
-            setIsAuthModalOpen(false)
-          }
-          onAuthSuccess={
-            handleAuthSuccess
-          }
+          onClose={() => setIsAuthModalOpen(false)}
+          onAuthSuccess={handleAuthSuccess}
         />
 
-        {/* Chat Modal */}
+        {/* CHAT MODAL */}
         <ChatModal
           isOpen={chatModal.isOpen}
           onClose={handleCloseChat}
           sellerId={chatModal.sellerId}
-          sellerName={
-            chatModal.listingTitle
-          }
-          listingId={
-            chatModal.listingId
-          }
-          listingTitle={
-            chatModal.listingTitle
-          }
+          sellerName={chatModal.listingTitle}
+          listingId={chatModal.listingId}
+          listingTitle={chatModal.listingTitle}
           currentUser={currentUser}
           API_BASE={API_BASE}
         />
 
-        {/* Tab Content */}
+        {/* ==================== BROWSE MARKETPLACE ==================== */}
         {activeTab === 'browse' && (
           <div className="tab-content">
-            {/* ============ FEATURE 3 - Seller Filter Banner ============ */}
             {sellerFilter && (
               <div className="seller-filter-banner">
                 <span>
                   👤 Showing listings by{' '}
-                  <strong>
-                    {sellerName ||
-                      'Seller'}
-                  </strong>
+                  <strong>{sellerName || 'Seller'}</strong>
                 </span>
 
                 <button
                   className="clear-filter-btn"
-                  onClick={
-                    clearSellerFilter
-                  }
+                  onClick={clearSellerFilter}
                 >
                   ✕ Clear Filter
                 </button>
               </div>
             )}
 
-            {/* ======================================================== */}
-
             <div className="search-filters">
               <input
                 type="text"
                 placeholder="Search items by title or description..."
                 value={searchTerm}
-                onChange={(e) =>
-                  setSearchTerm(
-                    e.target.value
-                  )
-                }
+                onChange={(e) => setSearchTerm(e.target.value)}
                 className="search-input"
               />
 
               <select
                 value={selectedCategory}
                 onChange={(e) =>
-                  setSelectedCategory(
-                    e.target.value
-                  )
+                  setSelectedCategory(e.target.value)
                 }
                 className="filter-select"
               >
-                {CATEGORIES.map(
-                  (cat) => (
-                    <option
-                      key={cat}
-                      value={cat}
-                    >
-                      {cat}
-                    </option>
-                  )
-                )}
+                {CATEGORIES.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
               </select>
 
               <select
                 value={selectedCampus}
                 onChange={(e) =>
-                  setSelectedCampus(
-                    e.target.value
-                  )
+                  setSelectedCampus(e.target.value)
                 }
                 className="filter-select"
               >
-                <option value="All">
-                  All Campuses
-                </option>
+                <option value="All">All Campuses</option>
 
-                {CAMPUSES.map(
-                  (camp) => (
-                    <option
-                      key={camp}
-                      value={camp}
-                    >
-                      {camp}
-                    </option>
-                  )
-                )}
+                {CAMPUSES.map((camp) => (
+                  <option key={camp} value={camp}>
+                    {camp}
+                  </option>
+                ))}
               </select>
             </div>
 
             <div className="listings-grid">
-              {filteredListings.length ===
-              0 ? (
+              {filteredListings.length === 0 ? (
                 <p className="empty-state">
                   No listings found matching your criteria.
                 </p>
               ) : (
-                filteredListings.map(
-                  (item) => (
-                    <ListingCard
-                      key={item.id}
-                      item={item}
-                      onOpenChat={
-                        handleOpenChat
-                      }
-                      currentUser={
-                        currentUser
-                      }
-                      onViewSellerListings={
-                        handleViewSellerListings
-                      }
-                    />
-                  )
-                )
+                filteredListings.map((item) => (
+                  <ListingCard
+                    key={item.id}
+                    item={item}
+                    onOpenChat={handleOpenChat}
+                    currentUser={currentUser}
+                    onViewSellerListings={handleViewSellerListings}
+                  />
+                ))
               )}
             </div>
           </div>
         )}
 
-        {activeTab === 'messages' &&
-          currentUser && (
-            <div className="tab-content">
-              <ChatInbox
-                currentUser={
-                  currentUser
-                }
-                onOpenChat={
-                  handleOpenChat
-                }
-                API_BASE={API_BASE}
-              />
-            </div>
-          )}
+        {/* ==================== MESSAGES ==================== */}
+        {activeTab === 'messages' && currentUser && (
+          <div className="tab-content">
+            <ChatInbox
+              currentUser={currentUser}
+              onOpenChat={handleOpenChat}
+              API_BASE={API_BASE}
+            />
+          </div>
+        )}
 
-        {activeTab === 'sell' && (
+        {/* ==================== SELL ITEM ==================== */}
+        {activeTab === 'sell' && currentUser && (
           <div className="tab-content">
             <div className="sell-form-container">
               <h2 className="section-title">
@@ -2043,39 +1720,31 @@ const res = await fetch(`${API_BASE}/api/listings`, {
               </h2>
 
               <form
-                onSubmit={
-                  handleCreateListing
-                }
+                onSubmit={handleCreateListing}
                 className="sell-form"
               >
                 <input
                   type="text"
                   placeholder="Title (e.g. Course Textbook, Calculator)"
-                  value={
-                    newListing.title
-                  }
+                  value={newListing.title}
                   required
                   className="form-input"
                   onChange={(e) =>
                     setNewListing({
                       ...newListing,
-                      title:
-                        e.target.value
+                      title: e.target.value,
                     })
                   }
                 />
 
                 <textarea
                   placeholder="Description"
-                  value={
-                    newListing.description
-                  }
+                  value={newListing.description}
                   className="form-textarea"
                   onChange={(e) =>
                     setNewListing({
                       ...newListing,
-                      description:
-                        e.target.value
+                      description: e.target.value,
                     })
                   }
                   rows="3"
@@ -2083,109 +1752,83 @@ const res = await fetch(`${API_BASE}/api/listings`, {
 
                 <div className="form-row">
                   <div className="form-group">
-                    <label>
-                      Campus Location
-                    </label>
+                    <label>Campus Location</label>
 
                     <select
-                      value={
-                        newListing.campus
-                      }
+                      value={newListing.campus}
                       className="form-select"
                       onChange={(e) =>
                         setNewListing({
                           ...newListing,
-                          campus:
-                            e.target.value
+                          campus: e.target.value,
                         })
                       }
                     >
-                      {CAMPUSES.map(
-                        (camp) => (
-                          <option
-                            key={camp}
-                            value={camp}
-                          >
-                            {camp}
-                          </option>
-                        )
-                      )}
+                      {CAMPUSES.map((camp) => (
+                        <option key={camp} value={camp}>
+                          {camp}
+                        </option>
+                      ))}
                     </select>
                   </div>
 
                   <div className="form-group">
-                    <label>
-                      Category
-                    </label>
+                    <label>Category</label>
 
                     <select
-                      value={
-                        newListing.category
-                      }
+                      value={newListing.category}
                       className="form-select"
                       onChange={(e) =>
                         setNewListing({
                           ...newListing,
-                          category:
-                            e.target.value
+                          category: e.target.value,
                         })
                       }
                     >
-                      {CATEGORIES.filter(
-                        (c) => c !== 'All'
-                      ).map((cat) => (
-                        <option
-                          key={cat}
-                          value={cat}
-                        >
-                          {cat}
-                        </option>
-                      ))}
+                      {CATEGORIES.filter((c) => c !== 'All').map(
+                        (cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        )
+                      )}
                     </select>
                   </div>
                 </div>
 
                 <div className="form-row">
                   <div className="form-group">
-                    <label>
-                      Price (ZMW)
-                    </label>
+                    <label>Price (ZMW)</label>
 
                     <input
                       type="number"
                       placeholder="0.00"
-                      value={
-                        newListing.price
-                      }
+                      value={newListing.price}
                       required
+                      min="0"
                       className="form-input"
                       onChange={(e) =>
                         setNewListing({
                           ...newListing,
-                          price:
-                            e.target.value
+                          price: e.target.value,
                         })
                       }
                     />
                   </div>
 
                   <div className="form-group">
-                    <label>
-                      Quantity
-                    </label>
+                    <label>Quantity</label>
 
                     <input
                       type="number"
                       placeholder="1"
-                      value={
-                        newListing.quantity
-                      }
+                      value={newListing.quantity}
+                      min="1"
                       className="form-input"
                       onChange={(e) =>
                         setNewListing({
                           ...newListing,
-                          quantity:
-                            e.target.value
+                          quantity: e.target.value,
                         })
                       }
                     />
@@ -2198,24 +1841,19 @@ const res = await fetch(`${API_BASE}/api/listings`, {
                   </label>
 
                   <input
+                    id="listing-images"
                     type="file"
                     accept="image/*"
                     multiple
                     className="form-file-input"
                     onChange={(e) =>
-                      setImageFiles(
-                        Array.from(
-                          e.target.files
-                        )
-                      )
+                      setImageFiles(Array.from(e.target.files))
                     }
                   />
 
-                  {imageFiles.length >
-                    0 && (
+                  {imageFiles.length > 0 && (
                     <p className="file-count">
-                      {imageFiles.length}{' '}
-                      image(s) selected
+                      {imageFiles.length} image(s) selected
                     </p>
                   )}
                 </div>
@@ -2225,167 +1863,202 @@ const res = await fetch(`${API_BASE}/api/listings`, {
                   disabled={isLoading}
                   className="submit-btn"
                 >
-                  {isLoading
-                    ? 'Publishing...'
-                    : 'Publish Listing'}
+                  {isLoading ? 'Publishing...' : 'Publish Listing'}
                 </button>
               </form>
             </div>
           </div>
         )}
 
-        {activeTab === 'dashboard' &&
-          currentUser && (
-            <div className="tab-content">
-              <div className="dashboard-container">
-                <h2 className="section-title">
-                  My Dashboard
-                </h2>
+        {/* ==================== SELLER DASHBOARD ==================== */}
+        {activeTab === 'dashboard' && currentUser && (
+          <div className="tab-content">
+            <div className="dashboard-container">
+              <h2 className="section-title">My Dashboard</h2>
 
-                <div className="dashboard-section">
-                  <h3 className="dashboard-subtitle">
-                    My Active Listings
-                  </h3>
+              <div className="dashboard-section">
+                <h3 className="dashboard-subtitle">
+                  My Listings
+                </h3>
 
-                  {sellerListings.length ===
-                  0 ? (
-                    <p className="empty-text">
-                      You have no active listings.
-                    </p>
-                  ) : (
-                    <div className="listings-list">
-                      {sellerListings.map(
-                        (item) => (
-                          <div
-                            key={item.id}
-                            className="listing-item"
-                          >
-                            <div className="listing-item-info">
-                              <strong>
-                                {item.title}
-                              </strong>
+                {sellerListings.length === 0 ? (
+                  <p className="empty-text">
+                    You have no listings yet.
+                  </p>
+                ) : (
+                  <div className="listings-list">
+                    {sellerListings.map((item) => {
+                      const isSold =
+                        item.is_sold === true ||
+                        item.is_sold === 'true';
 
-                              <span className="listing-item-price">
-                                ZMW {item.price}
+                      return (
+                        <div
+                          key={item.id}
+                          className={`listing-item ${
+                            isSold ? 'listing-item-sold' : ''
+                          }`}
+                        >
+                          <div className="listing-item-info">
+                            <strong>{item.title}</strong>
+
+                            <span className="listing-item-price">
+                              ZMW {item.price}
+                            </span>
+
+                            <span className="listing-item-stock">
+                              Stock: {item.quantity}
+                            </span>
+
+                            {/* Listing status badge */}
+                            <span
+                              style={{
+                                display: 'inline-block',
+                                width: 'fit-content',
+                                marginTop: '6px',
+                                padding: '4px 10px',
+                                borderRadius: '12px',
+                                fontSize: '11px',
+                                fontWeight: 'bold',
+                                backgroundColor: isSold
+                                  ? 'rgba(239, 68, 68, 0.15)'
+                                  : 'rgba(16, 185, 129, 0.15)',
+                                color: isSold
+                                  ? '#FCA5A5'
+                                  : THEME.emerald,
+                                border: `1px solid ${
+                                  isSold
+                                    ? 'rgba(239, 68, 68, 0.35)'
+                                    : 'rgba(16, 185, 129, 0.35)'
+                                }`,
+                              }}
+                            >
+                              {isSold ? 'SOLD' : 'ACTIVE'}
+                            </span>
+
+                            {/* Five-day deletion notice */}
+                            {isSold && item.sold_at && (
+                              <span
+                                style={{
+                                  display: 'block',
+                                  marginTop: '6px',
+                                  color: THEME.textMuted,
+                                  fontSize: '12px',
+                                  lineHeight: '1.5',
+                                }}
+                              >
+                                Scheduled for automatic deletion
+                                {' '}5 days after it was marked as sold.
                               </span>
-
-                              <span className="listing-item-stock">
-                                Stock: {item.quantity}
-                              </span>
-                            </div>
-
-                            <div className="listing-item-actions">
-                              {editingId ===
-                              item.id ? (
-                                <div className="edit-form">
-                                  <input
-                                    type="number"
-                                    placeholder="Price"
-                                    value={
-                                      editForm.price
-                                    }
-                                    onChange={(
-                                      e
-                                    ) =>
-                                      setEditForm(
-                                        {
-                                          ...editForm,
-                                          price:
-                                            e
-                                              .target
-                                              .value
-                                        }
-                                      )
-                                    }
-                                    className="edit-input"
-                                  />
-
-                                  <input
-                                    type="number"
-                                    placeholder="Quantity"
-                                    value={
-                                      editForm.quantity
-                                    }
-                                    onChange={(
-                                      e
-                                    ) =>
-                                      setEditForm(
-                                        {
-                                          ...editForm,
-                                          quantity:
-                                            e
-                                              .target
-                                              .value
-                                        }
-                                      )
-                                    }
-                                    className="edit-input"
-                                  />
-
-                                  <button
-                                    onClick={() =>
-                                      handleUpdateListing(
-                                        item.id
-                                      )
-                                    }
-                                    className="save-btn"
-                                  >
-                                    Save
-                                  </button>
-
-                                  <button
-                                    onClick={() =>
-                                      setEditingId(
-                                        null
-                                      )
-                                    }
-                                    className="cancel-btn"
-                                  >
-                                    Cancel
-                                  </button>
-                                </div>
-                              ) : (
-                                <>
-                                  <button
-                                    onClick={() => {
-                                      setEditingId(
-                                        item.id
-                                      );
-
-                                      setEditForm({
-                                        price:
-                                          item.price,
-                                        quantity:
-                                          item.quantity
-                                      });
-                                    }}
-                                    className="edit-btn"
-                                  >
-                                    Edit
-                                  </button>
-
-                                  <button
-                                    onClick={() =>
-                                      handleDeleteListing(
-                                        item.id
-                                      )
-                                    }
-                                    className="delete-btn"
-                                  >
-                                    Delete
-                                  </button>
-                                </>
-                              )}
-                            </div>
+                            )}
                           </div>
-                        )
-                      )}
-                    </div>
-                  )}
-                </div>
+
+                          <div className="listing-item-actions">
+                            {editingId === item.id ? (
+                              <div className="edit-form">
+                                <input
+                                  type="number"
+                                  placeholder="Price"
+                                  min="0"
+                                  value={editForm.price}
+                                  onChange={(e) =>
+                                    setEditForm({
+                                      ...editForm,
+                                      price: e.target.value,
+                                    })
+                                  }
+                                  className="edit-input"
+                                />
+
+                                <input
+                                  type="number"
+                                  placeholder="Quantity"
+                                  min="1"
+                                  value={editForm.quantity}
+                                  onChange={(e) =>
+                                    setEditForm({
+                                      ...editForm,
+                                      quantity: e.target.value,
+                                    })
+                                  }
+                                  className="edit-input"
+                                />
+
+                                <button
+                                  onClick={() =>
+                                    handleUpdateListing(item.id)
+                                  }
+                                  className="save-btn"
+                                >
+                                  Save
+                                </button>
+
+                                <button
+                                  onClick={() =>
+                                    setEditingId(null)
+                                  }
+                                  className="cancel-btn"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <>
+                                {/* Only active listings can be marked sold or edited. */}
+                                {!isSold && (
+                                  <>
+                                    <button
+                                      onClick={() =>
+                                        handleMarkAsSold(item.id)
+                                      }
+                                      className="save-btn"
+                                      style={{
+                                        backgroundColor: '#059669',
+                                        color: '#FFFFFF',
+                                        border: '1px solid #059669',
+                                      }}
+                                      title="Mark this listing as sold"
+                                    >
+                                      ✓ Mark as Sold
+                                    </button>
+
+                                    <button
+                                      onClick={() => {
+                                        setEditingId(item.id);
+
+                                        setEditForm({
+                                          price: item.price,
+                                          quantity: item.quantity,
+                                        });
+                                      }}
+                                      className="edit-btn"
+                                    >
+                                      Edit
+                                    </button>
+                                  </>
+                                )}
+
+                                {/* Delete remains available for active and sold listings. */}
+                                <button
+                                  onClick={() =>
+                                    handleDeleteListing(item.id)
+                                  }
+                                  className="delete-btn"
+                                >
+                                  Delete
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
-          )}
+          </div>
+        )}
       </div>
     </div>
   );

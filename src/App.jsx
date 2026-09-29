@@ -30,7 +30,7 @@ const CATEGORIES = [
 
 const CAMPUSES = [
   'Silverest Main Campus',
-  'Pioneer Campus',
+  'Leopards Hill Campus',
   'Mass Media Campus',
 ];
 
@@ -50,6 +50,109 @@ const THEME = {
   warning: '#F59E0B',
   success: '#10B981',
   danger: '#EF4444',
+};
+
+
+// ==================== PASSWORD RULES & STRENGTH ====================
+const PASSWORD_RULES = [
+  { id: 'length', label: 'At least 8 characters', test: (p) => p.length >= 8 },
+  { id: 'upper', label: 'One uppercase letter (A-Z)', test: (p) => /[A-Z]/.test(p) },
+  { id: 'lower', label: 'One lowercase letter (a-z)', test: (p) => /[a-z]/.test(p) },
+  { id: 'number', label: 'One number (0-9)', test: (p) => /\d/.test(p) },
+  { id: 'special', label: 'One special character (!@#$%^&* etc.)', test: (p) => /[^A-Za-z0-9]/.test(p) },
+];
+
+const COMMON_PASSWORDS = [
+  'password', 'password1', 'password123', 'qwerty', 'qwerty123',
+  '12345678', '123456789', 'iloveyou', 'admin123', 'welcome1',
+  'letmein', 'unilus', 'unilus123', 'abc12345',
+];
+
+const evaluatePassword = (password) => {
+  const results = PASSWORD_RULES.map((r) => ({ ...r, passed: r.test(password) }));
+  const allRulesMet = results.every((r) => r.passed);
+
+  if (!password) {
+    return { results, allRulesMet: false, score: 0, label: '', color: 'transparent', percent: 0 };
+  }
+
+  let score = results.filter((r) => r.passed).length; // 0-5
+  if (password.length >= 12) score += 1;
+  if (password.length >= 16) score += 1;
+  if (/(.)\1{2,}/.test(password)) score -= 1; // aaa, 111
+  if (COMMON_PASSWORDS.some((c) => password.toLowerCase().includes(c))) score = Math.min(score, 2);
+  if (!allRulesMet) score = Math.min(score, 3);
+
+  // Map to 4 levels
+  let level;
+  if (score <= 2) level = 0;
+  else if (score <= 4) level = 1;
+  else if (score <= 5) level = 2;
+  else level = 3;
+
+  const levels = [
+    { label: 'Weak', color: '#EF4444', percent: 25 },
+    { label: 'Fair', color: '#F59E0B', percent: 50 },
+    { label: 'Good', color: '#84CC16', percent: 75 },
+    { label: 'Strong', color: '#10B981', percent: 100 },
+  ];
+
+  return { results, allRulesMet, score, ...levels[level] };
+};
+
+// ==================== PASSWORD FIELD (show/hide + strength) ====================
+const PasswordField = ({ value, onChange, showStrength, placeholder = 'Password', autoComplete }) => {
+  const [visible, setVisible] = useState(false);
+  const strength = useMemo(() => evaluatePassword(value), [value]);
+
+  return (
+    <div className="password-field">
+      <div className="password-input-wrap">
+        <input
+          type={visible ? 'text' : 'password'}
+          placeholder={placeholder}
+          required
+          value={value}
+          onChange={onChange}
+          autoComplete={autoComplete}
+          maxLength={72}
+        />
+        <button
+          type="button"
+          className="password-toggle"
+          onClick={() => setVisible((v) => !v)}
+          aria-label={visible ? 'Hide password' : 'Show password'}
+          aria-pressed={visible}
+        >
+          {visible ? 'Hide' : 'Show'}
+        </button>
+      </div>
+
+      {showStrength && value && (
+        <div className="password-strength" aria-live="polite">
+          <div className="strength-bar">
+            <div
+              className="strength-bar-fill"
+              style={{ width: `${strength.percent}%`, background: strength.color }}
+            />
+          </div>
+          <span className="strength-label" style={{ color: strength.color }}>
+            {strength.label}
+          </span>
+        </div>
+      )}
+
+      {showStrength && (
+        <ul className="password-rules">
+          {strength.results.map((r) => (
+            <li key={r.id} className={r.passed ? 'rule-met' : 'rule-unmet'}>
+              <span className="rule-icon">{r.passed ? '✓' : '○'}</span> {r.label}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 };
 
 // ==================== TOAST HOOK ====================
@@ -760,7 +863,7 @@ const ListingCard = ({
 };
 
 // ============ AUTH MODAL ============
-const AuthModal = ({ isOpen, onClose, onAuthSuccess }) => {
+const AuthModal = ({ isOpen, onClose, onAuthSuccess, showToast }) => {
   const [isRegister, setIsRegister] = useState(false);
 
   const [authData, setAuthData] = useState({
@@ -771,10 +874,16 @@ const AuthModal = ({ isOpen, onClose, onAuthSuccess }) => {
   });
 
   const [isLoading, setIsLoading] = useState(false);
-  const { showToast } = useToast();
+  
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (isRegister && !evaluatePassword(authData.password).allRulesMet) {
+      showToast('Please meet all the password requirements.', 'error');
+      return;
+    }
+
     setIsLoading(true);
 
     const endpoint = isRegister
@@ -890,11 +999,10 @@ const AuthModal = ({ isOpen, onClose, onAuthSuccess }) => {
             }
           />
 
-          <input
-            type="password"
-            placeholder="Password"
-            required
+          <PasswordField
             value={authData.password}
+            showStrength={isRegister}
+            autoComplete={isRegister ? 'new-password' : 'current-password'}
             onChange={(e) =>
               setAuthData({
                 ...authData,
@@ -905,7 +1013,10 @@ const AuthModal = ({ isOpen, onClose, onAuthSuccess }) => {
 
           <button
             type="submit"
-            disabled={isLoading}
+            disabled={
+              isLoading ||
+              (isRegister && !evaluatePassword(authData.password).allRulesMet)
+            }
             className="auth-submit-btn"
           >
             {isLoading
@@ -1604,6 +1715,7 @@ function App() {
 
         {/* AUTH MODAL */}
         <AuthModal
+        showToast={showToast}
           isOpen={isAuthModalOpen}
           onClose={() => setIsAuthModalOpen(false)}
           onAuthSuccess={handleAuthSuccess}

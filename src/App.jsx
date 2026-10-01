@@ -863,8 +863,17 @@ const ListingCard = ({
 };
 
 // ============ AUTH MODAL ============
-const AuthModal = ({ isOpen, onClose, onAuthSuccess, showToast }) => {
-  const [isRegister, setIsRegister] = useState(false);
+const AuthModal = ({
+  isOpen,
+  onClose,
+  onAuthSuccess,
+  showToast,
+  resetToken = '',
+  onResetComplete = () => {},
+}) => {
+  // modes: 'login' | 'register' | 'forgot' | 'reset'
+  const [mode, setMode] = useState(resetToken ? 'reset' : 'login');
+  const isRegister = mode === 'register';
 
   const [authData, setAuthData] = useState({
     full_name: '',
@@ -872,42 +881,85 @@ const AuthModal = ({ isOpen, onClose, onAuthSuccess, showToast }) => {
     password: '',
     student_id: '',
   });
-
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  
+
+  const post = async (endpoint, body) => {
+    const res = await fetch(`${API_BASE}${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return res.json();
+  };
+
+  const switchMode = (next) => {
+    setMode(next);
+    setAuthData((d) => ({ ...d, password: '' }));
+    setConfirmPassword('');
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (isRegister && !evaluatePassword(authData.password).allRulesMet) {
+    if (
+      (mode === 'register' || mode === 'reset') &&
+      !evaluatePassword(authData.password).allRulesMet
+    ) {
       showToast('Please meet all the password requirements.', 'error');
+      return;
+    }
+
+    if (mode === 'reset' && authData.password !== confirmPassword) {
+      showToast('Passwords do not match.', 'error');
       return;
     }
 
     setIsLoading(true);
 
-    const endpoint = isRegister
-      ? '/api/auth/register'
-      : '/api/auth/login';
-
     try {
-      const res = await fetch(`${API_BASE}${endpoint}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(authData),
-      });
+      if (mode === 'forgot') {
+        const data = await post('/api/auth/forgot-password', {
+          email: authData.email,
+        });
 
-      const data = await res.json();
+        if (data.success) {
+          showToast(
+            'If an account exists for that email, a reset link has been sent. Check your inbox.',
+            'success'
+          );
+          switchMode('login');
+        } else {
+          showToast(data.error || 'Could not send reset link', 'error');
+        }
+        return;
+      }
+
+      if (mode === 'reset') {
+        const data = await post('/api/auth/reset-password', {
+          token: resetToken,
+          password: authData.password,
+        });
+
+        if (data.success) {
+          showToast('Password updated. Please sign in.', 'success');
+          onResetComplete();
+          switchMode('login');
+        } else {
+          showToast(data.error || 'Could not reset password', 'error');
+        }
+        return;
+      }
+
+      const data = await post(
+        isRegister ? '/api/auth/register' : '/api/auth/login',
+        authData
+      );
 
       if (data.success) {
         if (isRegister) {
-          showToast(
-            'Registration successful! Please sign in.',
-            'success'
-          );
-          setIsRegister(false);
+          showToast('Registration successful! Please sign in.', 'success');
+          switchMode('login');
         } else {
           localStorage.setItem('user', JSON.stringify(data.user));
           localStorage.setItem('token', data.token);
@@ -933,26 +985,41 @@ const AuthModal = ({ isOpen, onClose, onAuthSuccess, showToast }) => {
 
   if (!isOpen) return null;
 
+  const titles = {
+    login: ['Welcome Back', 'Sign in to your student account'],
+    register: ['Create Account', 'Join the UNILUS student marketplace'],
+    forgot: ['Forgot Password', "Enter your email and we'll send a reset link"],
+    reset: ['Set New Password', 'Choose a strong new password'],
+  };
+
+  const submitLabels = {
+    login: 'Sign In',
+    register: 'Create Account',
+    forgot: 'Send Reset Link',
+    reset: 'Update Password',
+  };
+
+  const needsStrongPassword = mode === 'register' || mode === 'reset';
+
+  const handleClose = () => {
+    if (mode === 'reset') onResetComplete();
+    onClose();
+  };
+
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" onClick={handleClose}>
       <div
         className="modal-content"
         onClick={(e) => e.stopPropagation()}
       >
-        <button className="modal-close" onClick={onClose}>
+        <button className="modal-close" onClick={handleClose}>
           ×
         </button>
 
         <div className="auth-header">
           <div className="auth-logo">U</div>
-
-          <h2>{isRegister ? 'Create Account' : 'Welcome Back'}</h2>
-
-          <p>
-            {isRegister
-              ? 'Join the UNILUS student marketplace'
-              : 'Sign in to your student account'}
-          </p>
+          <h2>{titles[mode][0]}</h2>
+          <p>{titles[mode][1]}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="auth-form">
@@ -964,10 +1031,7 @@ const AuthModal = ({ isOpen, onClose, onAuthSuccess, showToast }) => {
                 required
                 value={authData.full_name}
                 onChange={(e) =>
-                  setAuthData({
-                    ...authData,
-                    full_name: e.target.value,
-                  })
+                  setAuthData({ ...authData, full_name: e.target.value })
                 }
               />
 
@@ -977,64 +1041,93 @@ const AuthModal = ({ isOpen, onClose, onAuthSuccess, showToast }) => {
                 required
                 value={authData.student_id}
                 onChange={(e) =>
-                  setAuthData({
-                    ...authData,
-                    student_id: e.target.value,
-                  })
+                  setAuthData({ ...authData, student_id: e.target.value })
                 }
               />
             </>
           )}
 
-          <input
-            type="email"
-            placeholder="Student Email (@unilus.ac.zm)"
-            required
-            value={authData.email}
-            onChange={(e) =>
-              setAuthData({
-                ...authData,
-                email: e.target.value,
-              })
-            }
-          />
+          {mode !== 'reset' && (
+            <input
+              type="email"
+              placeholder="Student Email (@unilus.ac.zm)"
+              required
+              value={authData.email}
+              onChange={(e) =>
+                setAuthData({ ...authData, email: e.target.value })
+              }
+            />
+          )}
 
-          <PasswordField
-            value={authData.password}
-            showStrength={isRegister}
-            autoComplete={isRegister ? 'new-password' : 'current-password'}
-            onChange={(e) =>
-              setAuthData({
-                ...authData,
-                password: e.target.value,
-              })
-            }
-          />
+          {mode !== 'forgot' && (
+            <PasswordField
+              value={authData.password}
+              showStrength={needsStrongPassword}
+              placeholder={mode === 'reset' ? 'New password' : 'Password'}
+              autoComplete={
+                needsStrongPassword ? 'new-password' : 'current-password'
+              }
+              onChange={(e) =>
+                setAuthData({ ...authData, password: e.target.value })
+              }
+            />
+          )}
+
+          {mode === 'reset' && (
+            <>
+              <PasswordField
+                value={confirmPassword}
+                showStrength={false}
+                placeholder="Confirm new password"
+                autoComplete="new-password"
+                onChange={(e) => setConfirmPassword(e.target.value)}
+              />
+              {confirmPassword && authData.password !== confirmPassword && (
+                <span className="password-mismatch">
+                  Passwords do not match
+                </span>
+              )}
+            </>
+          )}
+
+          {mode === 'login' && (
+            <button
+              type="button"
+              className="forgot-link"
+              onClick={() => switchMode('forgot')}
+            >
+              Forgot password?
+            </button>
+          )}
 
           <button
             type="submit"
             disabled={
               isLoading ||
-              (isRegister && !evaluatePassword(authData.password).allRulesMet)
+              (needsStrongPassword &&
+                !evaluatePassword(authData.password).allRulesMet) ||
+              (mode === 'reset' && authData.password !== confirmPassword)
             }
             className="auth-submit-btn"
           >
-            {isLoading
-              ? 'Processing...'
-              : isRegister
-                ? 'Create Account'
-                : 'Sign In'}
+            {isLoading ? 'Processing...' : submitLabels[mode]}
           </button>
         </form>
 
-        <p
-          className="auth-toggle"
-          onClick={() => setIsRegister(!isRegister)}
-        >
-          {isRegister
-            ? 'Already have an account? Sign in'
-            : 'Need an account? Sign up'}
-        </p>
+        {mode === 'forgot' || mode === 'reset' ? (
+          <p className="auth-toggle" onClick={() => switchMode('login')}>
+            Back to sign in
+          </p>
+        ) : (
+          <p
+            className="auth-toggle"
+            onClick={() => switchMode(isRegister ? 'login' : 'register')}
+          >
+            {isRegister
+              ? 'Already have an account? Sign in'
+              : 'Need an account? Sign up'}
+          </p>
+        )}
       </div>
     </div>
   );
@@ -1806,7 +1899,17 @@ function App() {
   );
 
   const [activeTab, setActiveTab] = useState('browse');
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [resetToken, setResetToken] = useState(
+    () => new URLSearchParams(window.location.search).get('reset_token') || ''
+  );
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(() => !!resetToken);
+
+  useEffect(() => {
+    // Remove the token from the address bar so it isn't left in history or shared
+    if (window.location.search.includes('reset_token')) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
 
   const [chatModal, setChatModal] = useState({
     isOpen: false,
@@ -2510,6 +2613,8 @@ function App() {
         {/* AUTH MODAL */}
         <AuthModal
         showToast={showToast}
+          resetToken={resetToken}
+          onResetComplete={() => setResetToken('')}
           isOpen={isAuthModalOpen}
           onClose={() => setIsAuthModalOpen(false)}
           onAuthSuccess={handleAuthSuccess}

@@ -2302,3 +2302,12 @@
     transition: none;
   }
 }
+
+/* ==================== PASSWORD RESET ==================== */
+.forgot-link {
+  align-self: flex-end; background: transparent; border: none;
+  color: var(--emerald); font-size: 12px; cursor: pointer; padding: 0;
+  margin-top: -4px;
+}
+.forgot-link:hover { text-decoration: underline; }
+.password-mismatch { color: #EF4444; font-size: 12px; margin-top: -4px; }

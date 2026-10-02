@@ -883,6 +883,14 @@ const AuthModal = ({
   });
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [pendingEmail, setPendingEmail] = useState('');
+  const [resendIn, setResendIn] = useState(0);
+
+  useEffect(() => {
+    if (resendIn <= 0) return undefined;
+    const id = setTimeout(() => setResendIn((n) => n - 1), 1000);
+    return () => clearTimeout(id);
+  }, [resendIn]);
 
   const post = async (endpoint, body) => {
     const res = await fetch(`${API_BASE}${endpoint}`, {
@@ -897,6 +905,32 @@ const AuthModal = ({
     setMode(next);
     setAuthData((d) => ({ ...d, password: '' }));
     setConfirmPassword('');
+  };
+
+  const showCheckEmail = (email) => {
+    setPendingEmail(email);
+    setResendIn(60);
+    switchMode('check-email');
+  };
+
+  const handleResend = async () => {
+    if (resendIn > 0 || !pendingEmail) return;
+    setResendIn(60);
+
+    try {
+      const data = await post('/api/auth/resend-verification', {
+        email: pendingEmail,
+      });
+
+      showToast(
+        data.success
+          ? 'If that account needs verification, a new link has been sent.'
+          : data.error || 'Could not resend email',
+        data.success ? 'success' : 'error'
+      );
+    } catch (err) {
+      showToast('Connection error. Please try again.', 'error');
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -958,8 +992,11 @@ const AuthModal = ({
 
       if (data.success) {
         if (isRegister) {
-          showToast('Registration successful! Please sign in.', 'success');
-          switchMode('login');
+          showToast(
+            'Account created! Check your email to verify it.',
+            'success'
+          );
+          showCheckEmail(authData.email);
         } else {
           localStorage.setItem('user', JSON.stringify(data.user));
           localStorage.setItem('token', data.token);
@@ -973,6 +1010,9 @@ const AuthModal = ({
 
           onClose();
         }
+      } else if (data.code === 'EMAIL_NOT_VERIFIED') {
+        showToast(data.error, 'error');
+        showCheckEmail(authData.email);
       } else {
         showToast(data.error || 'Authentication failed', 'error');
       }
@@ -990,6 +1030,7 @@ const AuthModal = ({
     register: ['Create Account', 'Join the UNILUS student marketplace'],
     forgot: ['Forgot Password', "Enter your email and we'll send a reset link"],
     reset: ['Set New Password', 'Choose a strong new password'],
+    'check-email': ['Check Your Email', 'One more step to activate your account'],
   };
 
   const submitLabels = {
@@ -997,6 +1038,7 @@ const AuthModal = ({
     register: 'Create Account',
     forgot: 'Send Reset Link',
     reset: 'Update Password',
+    'check-email': '',
   };
 
   const needsStrongPassword = mode === 'register' || mode === 'reset';
@@ -1022,6 +1064,26 @@ const AuthModal = ({
           <p>{titles[mode][1]}</p>
         </div>
 
+        {mode === 'check-email' ? (
+          <div className="verify-panel">
+            <p>
+              We sent a verification link to <strong>{pendingEmail}</strong>.
+              Click it to activate your account, then sign in.
+            </p>
+            <p className="verify-hint">
+              Can't find it? Check your spam folder. The link expires in 24
+              hours.
+            </p>
+            <button
+              type="button"
+              className="auth-submit-btn"
+              onClick={handleResend}
+              disabled={resendIn > 0}
+            >
+              {resendIn > 0 ? `Resend email in ${resendIn}s` : 'Resend email'}
+            </button>
+          </div>
+        ) : (
         <form onSubmit={handleSubmit} className="auth-form">
           {isRegister && (
             <>
@@ -1113,8 +1175,9 @@ const AuthModal = ({
             {isLoading ? 'Processing...' : submitLabels[mode]}
           </button>
         </form>
+        )}
 
-        {mode === 'forgot' || mode === 'reset' ? (
+        {mode === 'forgot' || mode === 'reset' || mode === 'check-email' ? (
           <p className="auth-toggle" onClick={() => switchMode('login')}>
             Back to sign in
           </p>
@@ -1925,6 +1988,37 @@ function App() {
   const [sellerName, setSellerName] = useState('');
 
   const { toast, showToast } = useToast();
+
+  useEffect(() => {
+    const verifyToken = new URLSearchParams(window.location.search).get(
+      'verify_token'
+    );
+    if (!verifyToken) return;
+
+    // Remove the token from the address bar right away
+    window.history.replaceState({}, '', window.location.pathname);
+
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/verify-email`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: verifyToken }),
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          showToast('Email verified! You can now sign in.', 'success');
+          setIsAuthModalOpen(true);
+        } else {
+          showToast(data.error || 'Verification failed', 'error');
+        }
+      } catch (err) {
+        showToast('Connection error. Please try again.', 'error');
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const isAdmin = currentUser?.role === 'admin';
 

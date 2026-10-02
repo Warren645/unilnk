@@ -224,7 +224,11 @@
   position: fixed;
   bottom: 24px;
   right: 24px;
-  z-index: 1000;
+  z-index: 100000; /* must sit above modal overlays (z-index 1000) */
+}
+
+@media (max-width: 600px) {
+  .toast-container { left: 16px; right: 16px; bottom: 16px; }
 }
 
 .toast {
@@ -2316,3 +2320,16 @@
 .verify-panel { display: flex; flex-direction: column; gap: 12px; text-align: center; }
 .verify-panel p { margin: 0; }
 .verify-hint { font-size: 12px; color: var(--text-muted); }
+
+/* ==================== INLINE FORM ERROR ==================== */
+.auth-error {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid #EF4444;
+  color: #FCA5A5;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  margin-bottom: 14px;
+  text-align: left;
+}

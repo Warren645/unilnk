@@ -2311,3 +2311,8 @@
 }
 .forgot-link:hover { text-decoration: underline; }
 .password-mismatch { color: #EF4444; font-size: 12px; margin-top: -4px; }
+
+/* ==================== EMAIL VERIFICATION ==================== */
+.verify-panel { display: flex; flex-direction: column; gap: 12px; text-align: center; }
+.verify-panel p { margin: 0; }
+.verify-hint { font-size: 12px; color: var(--text-muted); }

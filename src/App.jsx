@@ -868,6 +868,7 @@ const AuthModal = ({
   onClose,
   onAuthSuccess,
   showToast,
+  initialMode = 'login',
   resetToken = '',
   onResetComplete = () => {},
 }) => {
@@ -884,6 +885,24 @@ const AuthModal = ({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [pendingEmail, setPendingEmail] = useState('');
+  const [formError, setFormError] = useState('');
+  const errorRef = useRef(null);
+
+  // Each time the modal opens, start on the screen the user asked for
+  useEffect(() => {
+    if (isOpen) {
+      setMode(resetToken ? 'reset' : initialMode);
+      setFormError('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  // Bring the error into view (the modal can scroll on small screens)
+  useEffect(() => {
+    if (formError && errorRef.current) {
+      errorRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [formError]);
   const [resendIn, setResendIn] = useState(0);
 
   useEffect(() => {
@@ -902,6 +921,7 @@ const AuthModal = ({
   };
 
   const switchMode = (next) => {
+    setFormError('');
     setMode(next);
     setAuthData((d) => ({ ...d, password: '' }));
     setConfirmPassword('');
@@ -922,30 +942,34 @@ const AuthModal = ({
         email: pendingEmail,
       });
 
-      showToast(
-        data.success
-          ? 'If that account needs verification, a new link has been sent.'
-          : data.error || 'Could not resend email',
-        data.success ? 'success' : 'error'
-      );
+      if (data.success) {
+        setFormError('');
+        showToast(
+          'If that account needs verification, a new link has been sent.',
+          'success'
+        );
+      } else {
+        setFormError(data.error || 'Could not resend email');
+      }
     } catch (err) {
-      showToast('Connection error. Please try again.', 'error');
+      setFormError('Connection error. Please check your internet and try again.');
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setFormError('');
 
     if (
       (mode === 'register' || mode === 'reset') &&
       !evaluatePassword(authData.password).allRulesMet
     ) {
-      showToast('Please meet all the password requirements.', 'error');
+      setFormError('Your password does not meet all the requirements listed below.');
       return;
     }
 
     if (mode === 'reset' && authData.password !== confirmPassword) {
-      showToast('Passwords do not match.', 'error');
+      setFormError('The two passwords do not match.');
       return;
     }
 
@@ -964,7 +988,7 @@ const AuthModal = ({
           );
           switchMode('login');
         } else {
-          showToast(data.error || 'Could not send reset link', 'error');
+          setFormError(data.error || 'Could not send reset link');
         }
         return;
       }
@@ -980,7 +1004,7 @@ const AuthModal = ({
           onResetComplete();
           switchMode('login');
         } else {
-          showToast(data.error || 'Could not reset password', 'error');
+          setFormError(data.error || 'Could not reset password');
         }
         return;
       }
@@ -1011,13 +1035,15 @@ const AuthModal = ({
           onClose();
         }
       } else if (data.code === 'EMAIL_NOT_VERIFIED') {
-        showToast(data.error, 'error');
         showCheckEmail(authData.email);
+        setFormError(
+          'Your email is not verified yet. Open the link we emailed you, or resend it below.'
+        );
       } else {
-        showToast(data.error || 'Authentication failed', 'error');
+        setFormError(data.error || 'Authentication failed');
       }
     } catch (err) {
-      showToast('Connection error. Please try again.', 'error');
+      setFormError('Connection error. Please check your internet and try again.');
     } finally {
       setIsLoading(false);
     }
@@ -1044,6 +1070,7 @@ const AuthModal = ({
   const needsStrongPassword = mode === 'register' || mode === 'reset';
 
   const handleClose = () => {
+    setFormError('');
     if (mode === 'reset') onResetComplete();
     onClose();
   };
@@ -1063,6 +1090,12 @@ const AuthModal = ({
           <h2>{titles[mode][0]}</h2>
           <p>{titles[mode][1]}</p>
         </div>
+
+        {formError && (
+          <div className="auth-error" role="alert" ref={errorRef}>
+            {formError}
+          </div>
+        )}
 
         {mode === 'check-email' ? (
           <div className="verify-panel">
@@ -1966,6 +1999,7 @@ function App() {
     () => new URLSearchParams(window.location.search).get('reset_token') || ''
   );
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(() => !!resetToken);
+  const [authMode, setAuthMode] = useState('login');
 
   useEffect(() => {
     // Remove the token from the address bar so it isn't left in history or shared
@@ -2009,6 +2043,7 @@ function App() {
 
         if (data.success) {
           showToast('Email verified! You can now sign in.', 'success');
+          setAuthMode('login');
           setIsAuthModalOpen(true);
         } else {
           showToast(data.error || 'Verification failed', 'error');
@@ -2457,6 +2492,7 @@ function App() {
     requireLogin = false
   ) => {
     if (requireLogin || !currentUser) {
+      setAuthMode('login');
       setIsAuthModalOpen(true);
 
       showToast(
@@ -2637,7 +2673,10 @@ function App() {
           <div className="auth-prompt">
             <button
               className="auth-prompt-btn"
-              onClick={() => setIsAuthModalOpen(true)}
+              onClick={() => {
+                setAuthMode('login');
+                setIsAuthModalOpen(true);
+              }}
             >
               Student Sign In
             </button>
@@ -2646,7 +2685,10 @@ function App() {
 
             <button
               className="auth-prompt-btn secondary"
-              onClick={() => setIsAuthModalOpen(true)}
+              onClick={() => {
+                setAuthMode('register');
+                setIsAuthModalOpen(true);
+              }}
             >
               Create Account
             </button>
@@ -2707,6 +2749,7 @@ function App() {
         {/* AUTH MODAL */}
         <AuthModal
         showToast={showToast}
+          initialMode={authMode}
           resetToken={resetToken}
           onResetComplete={() => setResetToken('')}
           isOpen={isAuthModalOpen}

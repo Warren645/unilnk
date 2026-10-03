@@ -2333,3 +2333,23 @@
   margin-bottom: 14px;
   text-align: left;
 }
+
+/* ==================== IDLE WARNING ==================== */
+.idle-overlay {
+  position: fixed; inset: 0; z-index: 99999;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(4px); padding: 16px;
+}
+.idle-dialog {
+  background: #0B1320; border: 1px solid rgba(0, 102, 51, 0.6);
+  border-radius: 14px; padding: 24px; max-width: 380px; width: 100%;
+  color: var(--text-primary, #F8FAFC); text-align: center;
+}
+.idle-dialog h3 { margin: 0 0 8px; }
+.idle-dialog p { margin: 0 0 18px; line-height: 1.5; }
+.idle-actions { display: flex; flex-direction: column; gap: 10px; }
+.idle-signout {
+  background: transparent; border: none; color: var(--text-muted, #94A3B8);
+  cursor: pointer; font-size: 13px; padding: 6px;
+}
+.idle-signout:hover { text-decoration: underline; }

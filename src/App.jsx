@@ -155,6 +155,147 @@ const PasswordField = ({ value, onChange, showStrength, placeholder = 'Password'
   );
 };
 
+// ==================== IDLE LOGOUT ====================
+const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // sign out after 30 minutes without activity
+const IDLE_WARNING_MS = 60 * 1000; // warn during the final minute
+const ACTIVITY_KEY = 'lastActivity';
+
+const readLastActivity = () => {
+  try {
+    const value = Number(localStorage.getItem(ACTIVITY_KEY));
+    return Number.isFinite(value) && value > 0 ? value : Date.now();
+  } catch (err) {
+    return Date.now();
+  }
+};
+
+const writeLastActivity = (time = Date.now()) => {
+  try {
+    localStorage.setItem(ACTIVITY_KEY, String(time));
+  } catch (err) {
+    /* storage unavailable: nothing to do */
+  }
+};
+
+/*
+  Counts real user input only (clicks, typing, touch, scroll, mouse).
+  Background polling does not keep a session alive. The last-activity time
+  lives in localStorage, so activity in any open tab keeps every tab signed in.
+*/
+const useIdleLogout = ({ enabled, onTimeout }) => {
+  const [secondsLeft, setSecondsLeft] = useState(null);
+  const warningRef = useRef(false);
+  const lastWriteRef = useRef(0);
+  const onTimeoutRef = useRef(onTimeout);
+
+  useEffect(() => {
+    onTimeoutRef.current = onTimeout;
+  });
+
+  const stayActive = useCallback(() => {
+    writeLastActivity();
+    lastWriteRef.current = Date.now();
+    warningRef.current = false;
+    setSecondsLeft(null);
+  }, []);
+
+  useEffect(() => {
+    if (!enabled) {
+      warningRef.current = false;
+      return undefined;
+    }
+
+    // Starting point for a fresh session
+    try {
+      if (!localStorage.getItem(ACTIVITY_KEY)) writeLastActivity();
+    } catch (err) {
+      /* ignore */
+    }
+
+    const onActivity = () => {
+      // While the warning is open, only its buttons count
+      if (warningRef.current) return;
+
+      const now = Date.now();
+      if (now - lastWriteRef.current > 5000) {
+        writeLastActivity(now);
+        lastWriteRef.current = now;
+      }
+    };
+
+    const check = () => {
+      const idleFor = Date.now() - readLastActivity();
+
+      if (idleFor >= IDLE_TIMEOUT_MS) {
+        onTimeoutRef.current();
+        return;
+      }
+
+      const remaining = IDLE_TIMEOUT_MS - idleFor;
+
+      if (remaining <= IDLE_WARNING_MS) {
+        warningRef.current = true;
+        setSecondsLeft(Math.ceil(remaining / 1000));
+      } else if (warningRef.current) {
+        // activity in another tab cancelled the warning
+        warningRef.current = false;
+        setSecondsLeft(null);
+      }
+    };
+
+    const events = [
+      'mousedown',
+      'mousemove',
+      'keydown',
+      'touchstart',
+      'scroll',
+      'wheel',
+    ];
+    events.forEach((name) =>
+      window.addEventListener(name, onActivity, { passive: true, capture: true })
+    );
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') check();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    check(); // handles a session that went stale while the browser was closed
+    const timer = setInterval(check, 1000);
+
+    return () => {
+      clearInterval(timer);
+      events.forEach((name) =>
+        window.removeEventListener(name, onActivity, { capture: true })
+      );
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [enabled]);
+
+  return { secondsLeft, stayActive };
+};
+
+const IdleWarningModal = ({ secondsLeft, onStay, onLogout }) => (
+  <div className="idle-overlay" role="alertdialog" aria-modal="true" aria-labelledby="idle-title">
+    <div className="idle-dialog">
+      <h3 id="idle-title">Still there?</h3>
+      <p aria-live="polite">
+        For your security, you will be signed out in{' '}
+        <strong>{secondsLeft}</strong> second{secondsLeft === 1 ? '' : 's'}{' '}
+        because of inactivity.
+      </p>
+      <div className="idle-actions">
+        <button type="button" className="auth-submit-btn" onClick={onStay} autoFocus>
+          Stay signed in
+        </button>
+        <button type="button" className="idle-signout" onClick={onLogout}>
+          Sign out now
+        </button>
+      </div>
+    </div>
+  </div>
+);
+
 // ==================== TOAST HOOK ====================
 const useToast = () => {
   const [toast, setToast] = useState(null);
@@ -1024,6 +1165,7 @@ const AuthModal = ({
         } else {
           localStorage.setItem('user', JSON.stringify(data.user));
           localStorage.setItem('token', data.token);
+          writeLastActivity();
 
           onAuthSuccess(data.user);
 
@@ -2266,6 +2408,7 @@ function App() {
   const handleLogout = () => {
     localStorage.removeItem('user');
     localStorage.removeItem('token');
+    localStorage.removeItem(ACTIVITY_KEY);
 
     setCurrentUser(null);
     setSellerListings([]);
@@ -2274,6 +2417,65 @@ function App() {
 
     showToast('Logged out successfully', 'info');
   };
+
+  // Idle timeout: wipe the session and reload so no account data stays in memory
+  const handleIdleTimeout = () => {
+    localStorage.removeItem('user');
+    localStorage.removeItem('token');
+    localStorage.removeItem(ACTIVITY_KEY);
+
+    try {
+      sessionStorage.setItem('idleLogout', '1');
+    } catch (err) {
+      /* ignore */
+    }
+
+    window.location.reload();
+  };
+
+  // After an idle sign-out reload: explain what happened and offer sign-in.
+  // Must stay ABOVE useIdleLogout: effects run in order, and this one has to
+  // consume the flag before the idle check can set it again on a stale load.
+  useEffect(() => {
+    let flagged = false;
+    try {
+      flagged = sessionStorage.getItem('idleLogout') === '1';
+      if (flagged) sessionStorage.removeItem('idleLogout');
+    } catch (err) {
+      /* ignore */
+    }
+
+    if (flagged) {
+      showToast(
+        'You were signed out after 30 minutes of inactivity. Please sign in again.',
+        'info'
+      );
+      setAuthMode('login');
+      setIsAuthModalOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const { secondsLeft: idleSecondsLeft, stayActive } = useIdleLogout({
+    enabled: !!currentUser,
+    onTimeout: handleIdleTimeout,
+  });
+
+  // Signed out in another tab -> sign out here too
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key === 'token' && !e.newValue) {
+        setCurrentUser(null);
+        setSellerListings([]);
+        setEditingId(null);
+        setActiveTab('browse');
+      }
+    };
+
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
 
   // ==================== DELETE LISTING ====================
   const handleDeleteListing = async (listingId) => {
@@ -2745,6 +2947,15 @@ function App() {
             <TabButton tab="admin" label="Moderation" icon="🛡️" />
           )}
         </nav>
+
+        {/* IDLE WARNING */}
+        {currentUser && idleSecondsLeft !== null && (
+          <IdleWarningModal
+            secondsLeft={idleSecondsLeft}
+            onStay={stayActive}
+            onLogout={handleLogout}
+          />
+        )}
 
         {/* AUTH MODAL */}
         <AuthModal

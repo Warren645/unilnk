@@ -2582,3 +2582,9 @@
 
 .session-profile-button { display: inline-flex; align-items: center; gap: 8px; }
 .session-profile-avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }
+
+.app-navigation-controls { display: flex; align-items: center; gap: 10px; margin: 16px 0; flex-wrap: wrap; }
+.app-navigation-controls button { min-height: 44px; border: 1px solid #345541; border-radius: 9px; background: #102a20; color: #e7f6eb; padding: 8px 16px; cursor: pointer; }
+.app-navigation-controls button:disabled { opacity: .45; cursor: default; }
+.app-navigation-controls button:focus-visible { outline: 3px solid #34d399; outline-offset: 3px; }
+.app-navigation-controls span { color: #b7c8be; font-size: 13px; }

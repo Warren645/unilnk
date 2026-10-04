@@ -1,8 +1,11 @@
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, createContext, useContext } from 'react';
 import { createPortal } from 'react-dom';
 import './App.css';
 import ProfileManager from './ProfileManager';
+import { HOME, useAppNavigation } from './navigation';
+
+const PhotoNavigationContext = createContext(null);
 
 // ==================== API BASE URL ====================
 const API_BASE =
@@ -616,7 +619,7 @@ const SellerProfileModal = ({
   showToast,
 }) => {
   const [data, setData] = useState(null);
-  const [viewAvatar, setViewAvatar] = useState(false);
+  const openPhoto = useContext(PhotoNavigationContext);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [rating, setRating] = useState(0);
@@ -744,8 +747,8 @@ const SellerProfileModal = ({
           data && (
             <>
               <div className="profile-head">
-                {seller.avatar_url ? <button type="button" className="profile-avatar profile-avatar-photo" onClick={() => setViewAvatar(true)} aria-label={`View ${seller.full_name}'s profile photo`}><img src={seller.avatar_url} alt={seller.full_name} /></button> : <div className="profile-avatar">{(seller.full_name || 'U').charAt(0)}</div>}
-                {viewAvatar && seller.avatar_url && <ListingPhotoViewer images={[seller.avatar_url]} initialIndex={0} title={`${seller.full_name}'s profile photo`} onClose={() => setViewAvatar(false)} />}
+                {seller.avatar_url ? <button type="button" className="profile-avatar profile-avatar-photo" onClick={() => openPhoto({images:[seller.avatar_url], initialIndex:0, title:`${seller.full_name}'s profile photo`})} aria-label={`View ${seller.full_name}'s profile photo`}><img src={seller.avatar_url} alt={seller.full_name} /></button> : <div className="profile-avatar">{(seller.full_name || 'U').charAt(0)}</div>}
+
                 <div className="profile-head-info">
                   <h3>{seller.full_name}</h3>
                   <RatingLine rating={data.stats.rating} count={data.stats.review_count} size={15} />
@@ -1592,7 +1595,7 @@ const ListingCard = ({
 }) => {
   const [activeImgIndex, setActiveImgIndex] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
-  const [photoViewerOpen, setPhotoViewerOpen] = useState(false);
+  const openPhoto = useContext(PhotoNavigationContext);
 
   let images = [];
 
@@ -1651,8 +1654,7 @@ const ListingCard = ({
         transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
       }}
     >
-      {photoViewerOpen && <ListingPhotoViewer images={images} initialIndex={activeImgIndex}
-        title={item.title} onClose={() => setPhotoViewerOpen(false)} />}
+
       <div>
         <div
           style={{
@@ -1666,7 +1668,7 @@ const ListingCard = ({
           }}
         >
           {images.length > 0 && images[activeImgIndex] ? (
-            <button type="button" className="listing-photo-open" onClick={() => setPhotoViewerOpen(true)}
+            <button type="button" className="listing-photo-open" onClick={() => openPhoto({images, initialIndex:activeImgIndex, title:item.title})}
               aria-label={`View ${item.title} photos full size`}>
             <img
                             src={thumb(images[activeImgIndex], 600)}
@@ -3719,33 +3721,35 @@ function App() {
     JSON.parse(localStorage.getItem('user')) || null
   );
 
-  const [activeTab, setActiveTab] = useState('browse');
+  const navigation = useAppNavigation({ ...HOME, auth: !!new URLSearchParams(window.location.search).get('reset_token') }, currentUser?.id || currentUser?.user?.id, currentUser?.role === 'admin');
+  const activeTab = navigation.state.tab;
+  const setActiveTab = (value) => navigation.set('tab',value);
   const [resetToken, setResetToken] = useState(
     () => new URLSearchParams(window.location.search).get('reset_token') || ''
   );
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(() => !!resetToken);
+  const isAuthModalOpen = navigation.state.auth;
+  const setIsAuthModalOpen = (value) => navigation.set('auth',value);
   const [authMode, setAuthMode] = useState('login');
 
   useEffect(() => {
     // Remove the token from the address bar so it isn't left in history or shared
     if (window.location.search.includes('reset_token')) {
-      window.history.replaceState({}, '', window.location.pathname);
+      window.history.replaceState(window.history.state, '', window.location.pathname);
     }
   }, []);
 
-  const [chatModal, setChatModal] = useState({
-    isOpen: false,
-    sellerId: null,
-    listingId: null,
-    listingTitle: '',
-  });
+  const chatModal = navigation.state.chat;
+  const setChatModal = (value) => navigation.set('chat',value);
 
   const [unreadTotal, setUnreadTotal] = useState(0);
   const chatListeners = useRef(new Set());
   const chatModalRef = useRef(null);
-  const [profileSellerId, setProfileSellerId] = useState(null);
-  const [isProfileManagerOpen, setIsProfileManagerOpen] = useState(false);
-  const [reportTarget, setReportTarget] = useState(null);
+  const profileSellerId = navigation.state.profile;
+  const setProfileSellerId = (value) => navigation.set('profile',value);
+  const isProfileManagerOpen = navigation.state.manage;
+  const setIsProfileManagerOpen = (value) => navigation.set('manage',value);
+  const reportTarget = navigation.state.report;
+  const setReportTarget = (value) => navigation.set('report',value);
   const [favoriteIds, setFavoriteIds] = useState(() => new Set());
   const [savedListings, setSavedListings] = useState([]);
   const [isSavedLoading, setIsSavedLoading] = useState(false);
@@ -3772,7 +3776,7 @@ function App() {
     if (!verifyToken) return;
 
     // Remove the token from the address bar right away
-    window.history.replaceState({}, '', window.location.pathname);
+    window.history.replaceState(window.history.state, '', window.location.pathname);
 
     (async () => {
       try {
@@ -4712,6 +4716,7 @@ function App() {
 
   // ==================== MAIN UI ====================
   return (
+    <PhotoNavigationContext.Provider value={(photo) => navigation.set('photo',photo)}>
     <div className="app-container">
       <div className="accent-bar" />
 
@@ -4789,6 +4794,11 @@ function App() {
           </div>
         )}
 
+        <div className="app-navigation-controls" aria-label="Page navigation">
+          <button type="button" onClick={navigation.back} disabled={!navigation.canGoBack}>← Back</button>
+          <button type="button" onClick={navigation.home}>⌂ Home</button>
+          <span>{({browse:'Marketplace',messages:'Messages',saved:'Saved listings',sell:'Create listing',dashboard:'My dashboard',admin:'Moderation'})[activeTab]}</span>
+        </div>
         {/* NAVIGATION TABS */}
         <nav className="tab-nav">
           <TabButton
@@ -4835,6 +4845,7 @@ function App() {
           />
         )}
 
+        {navigation.state.photo && <ListingPhotoViewer key={JSON.stringify(navigation.state.photo)} {...navigation.state.photo} onClose={() => navigation.set('photo',null)} />}
         {/* AUTH MODAL */}
         <AuthModal
         showToast={showToast}
@@ -4871,7 +4882,7 @@ function App() {
         />
 
         {isProfileManagerOpen && currentUser && <ProfileManager apiBase={API_BASE} authHeaders={getAuthHeaders}
-          PhotoViewer={ListingPhotoViewer} onClose={() => setIsProfileManagerOpen(false)}
+          onViewPhoto={(photo) => navigation.set('photo',photo)} onClose={() => setIsProfileManagerOpen(false)}
           onSaved={(user) => { localStorage.setItem('user', JSON.stringify(user)); setCurrentUser(user); fetchListings(); }}
           onViewPublic={(id) => { setIsProfileManagerOpen(false); setProfileSellerId(id); }} />}
         {/* SELLER PROFILE */}
@@ -5435,6 +5446,7 @@ function App() {
         )}
       </div>
     </div>
+    </PhotoNavigationContext.Provider>
   );
 }
 

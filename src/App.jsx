@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import './App.css';
+import ProfileManager from './ProfileManager';
 
 // ==================== API BASE URL ====================
 const API_BASE =
@@ -615,6 +616,7 @@ const SellerProfileModal = ({
   showToast,
 }) => {
   const [data, setData] = useState(null);
+  const [viewAvatar, setViewAvatar] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [rating, setRating] = useState(0);
@@ -742,7 +744,8 @@ const SellerProfileModal = ({
           data && (
             <>
               <div className="profile-head">
-                <div className="profile-avatar">{(seller.full_name || 'U').charAt(0)}</div>
+                {seller.avatar_url ? <button type="button" className="profile-avatar profile-avatar-photo" onClick={() => setViewAvatar(true)} aria-label={`View ${seller.full_name}'s profile photo`}><img src={seller.avatar_url} alt={seller.full_name} /></button> : <div className="profile-avatar">{(seller.full_name || 'U').charAt(0)}</div>}
+                {viewAvatar && seller.avatar_url && <ListingPhotoViewer images={[seller.avatar_url]} initialIndex={0} title={`${seller.full_name}'s profile photo`} onClose={() => setViewAvatar(false)} />}
                 <div className="profile-head-info">
                   <h3>{seller.full_name}</h3>
                   <RatingLine rating={data.stats.rating} count={data.stats.review_count} size={15} />
@@ -753,6 +756,8 @@ const SellerProfileModal = ({
                 </div>
               </div>
 
+              {(seller.campus || seller.programme) && <p className="profile-sub">{[seller.campus, seller.programme].filter(Boolean).join(' · ')}</p>}
+              {seller.bio && <p className="profile-bio">{seller.bio}</p>}
               {!viewer.is_self && (
                 <button
                   className="profile-message-btn"
@@ -3739,6 +3744,7 @@ function App() {
   const chatListeners = useRef(new Set());
   const chatModalRef = useRef(null);
   const [profileSellerId, setProfileSellerId] = useState(null);
+  const [isProfileManagerOpen, setIsProfileManagerOpen] = useState(false);
   const [reportTarget, setReportTarget] = useState(null);
   const [favoriteIds, setFavoriteIds] = useState(() => new Set());
   const [savedListings, setSavedListings] = useState([]);
@@ -4052,6 +4058,7 @@ function App() {
   };
 
   const handleLogout = () => {
+    setIsProfileManagerOpen(false);
     localStorage.removeItem('user');
     localStorage.removeItem('token');
     localStorage.removeItem(ACTIVITY_KEY);
@@ -4775,6 +4782,7 @@ function App() {
               )}
             </span>
 
+            <button className="adm-btn adm-btn-ghost session-profile-button" onClick={() => setIsProfileManagerOpen(true)}>{currentUser.avatar_url && <img className="session-profile-avatar" src={currentUser.avatar_url} alt="" />}My profile</button>
             <button className="logout-btn" onClick={handleLogout}>
               Log Out
             </button>
@@ -4862,6 +4870,10 @@ function App() {
           }
         />
 
+        {isProfileManagerOpen && currentUser && <ProfileManager apiBase={API_BASE} authHeaders={getAuthHeaders}
+          PhotoViewer={ListingPhotoViewer} onClose={() => setIsProfileManagerOpen(false)}
+          onSaved={(user) => { localStorage.setItem('user', JSON.stringify(user)); setCurrentUser(user); fetchListings(); }}
+          onViewPublic={(id) => { setIsProfileManagerOpen(false); setProfileSellerId(id); }} />}
         {/* SELLER PROFILE */}
         <SellerProfileModal
           sellerId={profileSellerId}
@@ -5215,6 +5227,7 @@ function App() {
             <div className="dashboard-container">
                             <h2 className="section-title">My Dashboard</h2>
 
+              <button className="adm-btn dashboard-profile-btn" onClick={() => setIsProfileManagerOpen(true)}>Edit my profile</button>
               <button
                 className="adm-btn adm-btn-ghost dashboard-profile-btn"
                 onClick={() => setProfileSellerId(currentUser.id || currentUser.user?.id)}

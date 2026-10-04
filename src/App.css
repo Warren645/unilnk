@@ -2494,3 +2494,41 @@
   .profile-modal { padding: 18px; }
   .profile-head { gap: 12px; }
 }
+
+
+/* ==================== CHAT: ONE THREAD PER ITEM ==================== */
+.conversation-item-chip {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 3px 0 2px;
+  font-size: 12px; color: var(--text-light, #E2E8F0);
+}
+.conversation-item-chip img { width: 22px; height: 22px; border-radius: 4px; object-fit: cover; }
+.chip-title { font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip-price { color: var(--emerald); font-weight: 700; }
+.chip-tag {
+  padding: 0 7px; border-radius: 999px; font-size: 10px; font-weight: 700;
+  background: rgba(239, 68, 68, 0.15); color: #FCA5A5; border: 1px solid rgba(239, 68, 68, 0.3);
+}
+.chat-item-card {
+  display: flex; align-items: center; gap: 10px; margin-top: 8px; padding: 8px 10px;
+  border-radius: 10px; border: 1px solid var(--border-green); background: rgba(255, 255, 255, 0.04);
+}
+.chat-item-card img { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; flex-shrink: 0; }
+.chat-item-info { display: flex; flex-direction: column; min-width: 0; }
+.chat-item-info strong { font-size: 14px; color: var(--text-main, #F8FAFC); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-item-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted, #94A3B8); }
+.chat-item-meta { font-size: 12px; color: var(--emerald); }
+.chat-threads {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 14px;
+  border-top: 1px solid var(--border-green); font-size: 12px; color: var(--text-muted, #94A3B8);
+}
+.chat-thread-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; cursor: pointer;
+  background: transparent; border: 1px solid var(--border-green); color: var(--text-light, #E2E8F0);
+  font-family: inherit; font-size: 12px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-thread-chip:hover { border-color: var(--emerald); color: var(--emerald); }
+.chip-unread {
+  min-width: 16px; padding: 0 5px; border-radius: 999px; background: #EF4444; color: #fff;
+  font-size: 10px; font-weight: 700; text-align: center; line-height: 16px;
+}
+.message-about { display: block; font-size: 10px; opacity: 0.75; margin-bottom: 2px; font-style: italic; }

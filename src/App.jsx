@@ -987,11 +987,21 @@ const ChatInbox = ({ currentUser, onOpenChat, API_BASE, subscribe }) => {
           const unread = Number(conv.unread_count) || 0;
           const blocked = conv.blocked_by_me || conv.blocked_me;
 
+                    const convImages = parseImages(conv.listing_image_url);
+
           return (
             <div
-              key={conv.user_id}
+              key={`${conv.user_id}-${conv.listing_id ?? 'general'}`}
               className={`conversation-item ${unread > 0 ? 'has-unread' : ''}`}
-              onClick={() => onOpenChat(conv.user_id, null, conv.user_name)}
+              onClick={() =>
+                onOpenChat(
+                  conv.user_id,
+                  conv.listing_id || null,
+                  conv.user_name,
+                  false,
+                  conv.listing_title || ''
+                )
+              }
             >
               <div className="conversation-avatar">
                 <span>{conv.user_name?.charAt(0) || 'U'}</span>
@@ -1005,13 +1015,36 @@ const ChatInbox = ({ currentUser, onOpenChat, API_BASE, subscribe }) => {
                   {conv.blocked_by_me && <span className="blocked-tag">Blocked</span>}
                 </div>
 
+                                <div className="conversation-item-chip">
+                  {conv.listing_id || conv.listing_title ? (
+                    <>
+                      {convImages[0] && (
+                        <img src={thumb(convImages[0], 80)} alt="" loading="lazy" />
+                      )}
+                      <span className="chip-title">
+                        📦 {conv.listing_title || 'Item'}
+                      </span>
+                      {conv.listing_price != null && (
+                        <span className="chip-price">ZMW {conv.listing_price}</span>
+                      )}
+                      {conv.listing_id && conv.listing_sold && (
+                        <span className="chip-tag">Sold</span>
+                      )}
+                      {!conv.listing_id && (
+                        <span className="chip-tag">No longer listed</span>
+                      )}
+                      {conv.listing_id && !conv.listing_available && (
+                        <span className="chip-tag">Unavailable</span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="chip-title">💬 General chat</span>
+                  )}
+                </div>
+
                 <div className="conversation-last-message">
                   {blocked ? 'Messaging unavailable' : conv.last_message || 'No messages yet'}
                 </div>
-
-                {conv.listing_title && (
-                  <div className="conversation-listing">📦 {conv.listing_title}</div>
-                )}
               </div>
 
               <div className="conversation-time">
@@ -1053,11 +1086,14 @@ const ChatModal = ({
   listingTitle,
   currentUser,
   API_BASE,
-  subscribe,
+    subscribe,
   onRead,
   onViewProfile,
+  onSwitchThread,
 }) => {
   const [messages, setMessages] = useState([]);
+  const [item, setItem] = useState(null);
+  const [otherThreads, setOtherThreads] = useState([]);
   const [hasMore, setHasMore] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
@@ -1072,22 +1108,48 @@ const ChatModal = ({
   const stickRef = useRef(true);
   const prependRef = useRef(null);
 
-  const userId = currentUser?.id || currentUser?.user?.id;
+    const userId = currentUser?.id || currentUser?.user?.id;
   const otherId = Number(sellerId);
+  // Every chat is about ONE item (or "general" when it is not about an item)
+  const threadParam = listingId ? String(listingId) : 'general';
 
   const markAsRead = useCallback(async () => {
     if (!userId || !otherId) return;
 
     try {
-      await fetch(`${API_BASE}/api/chat/mark-read/${userId}/${otherId}`, {
+      await fetch(`${API_BASE}/api/chat/mark-read/${userId}/${otherId}?listing_id=${threadParam}`, {
         method: 'PUT',
         headers: { ...getAuthHeaders() },
       });
       onRead?.();
-    } catch (err) {
+        } catch (err) {
       console.error('Failed to mark messages as read:', err);
     }
-  }, [API_BASE, userId, otherId, onRead]);
+  }, [API_BASE, userId, otherId, threadParam, onRead]);
+
+  // The other chats with this same person (other items), to jump between them
+  const loadOtherThreads = useCallback(async () => {
+    if (!userId || !otherId) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/chat/conversations/${userId}`, {
+        headers: { ...getAuthHeaders() },
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        setOtherThreads(
+          data.conversations.filter(
+            (c) =>
+              Number(c.user_id) === otherId &&
+              Number(c.listing_id || 0) !== Number(listingId || 0)
+          )
+        );
+      }
+    } catch (err) {
+      /* the chips are optional */
+    }
+  }, [API_BASE, userId, otherId, listingId]);
 
   // Newest messages first-page; "silent" refreshes merge instead of replacing
   const loadLatest = useCallback(
@@ -1096,12 +1158,13 @@ const ChatModal = ({
 
       try {
         const res = await fetch(
-          `${API_BASE}/api/chat/messages/${userId}/${otherId}?limit=${CHAT_PAGE_SIZE}`,
+                    `${API_BASE}/api/chat/messages/${userId}/${otherId}?limit=${CHAT_PAGE_SIZE}&listing_id=${threadParam}`,
           { headers: { ...getAuthHeaders() } }
         );
         const data = await res.json();
 
         if (res.ok && data.success) {
+          if (data.listing) setItem(data.listing);
           setMessages((prev) =>
             silent ? mergeMessages(prev, data.messages || []) : data.messages || []
           );
@@ -1117,7 +1180,7 @@ const ChatModal = ({
         if (!silent) setIsLoading(false);
       }
     },
-    [API_BASE, userId, otherId]
+        [API_BASE, userId, otherId, threadParam]
   );
 
   const loadOlder = async () => {
@@ -1126,7 +1189,7 @@ const ChatModal = ({
 
     try {
       const res = await fetch(
-        `${API_BASE}/api/chat/messages/${userId}/${otherId}?limit=${CHAT_PAGE_SIZE}&offset=${messages.length}`,
+                `${API_BASE}/api/chat/messages/${userId}/${otherId}?limit=${CHAT_PAGE_SIZE}&offset=${messages.length}&listing_id=${threadParam}`,
         { headers: { ...getAuthHeaders() } }
       );
       const data = await res.json();
@@ -1151,7 +1214,8 @@ const ChatModal = ({
   useEffect(() => {
     if (!isOpen || !otherId || !userId) return undefined;
 
-    setMessages([]);
+        setMessages([]);
+    setItem(null);
     setHasMore(false);
     setIsLoading(true);
     setChatError('');
@@ -1161,17 +1225,23 @@ const ChatModal = ({
 
     loadLatest();
     markAsRead();
+    loadOtherThreads();
 
     // Safety net only: messages normally arrive through the live stream
     const interval = setInterval(() => loadLatest({ silent: true }), 20000);
     return () => clearInterval(interval);
-  }, [isOpen, otherId, userId, loadLatest, markAsRead]);
+    }, [isOpen, otherId, userId, loadLatest, markAsRead, loadOtherThreads]);
 
   // Live messages
   useEffect(() => {
     if (!isOpen || !subscribe || !otherId || !userId) return undefined;
 
-    return subscribe((event, payload) => {
+        return subscribe((event, payload) => {
+      if (event === 'read') {
+        loadOtherThreads();
+        return;
+      }
+
       if (event !== 'message') return;
 
       const fromThem =
@@ -1181,10 +1251,16 @@ const ChatModal = ({
 
       if (!fromThem && !fromMe) return;
 
+      // A message about a DIFFERENT item belongs to that item's own chat
+      if (Number(payload.listing_id || 0) !== Number(listingId || 0)) {
+        loadOtherThreads();
+        return;
+      }
+
       setMessages((prev) => mergeMessages(prev, [payload]));
       if (fromThem) markAsRead();
     });
-  }, [isOpen, subscribe, otherId, userId, markAsRead]);
+  }, [isOpen, subscribe, otherId, userId, listingId, markAsRead, loadOtherThreads]);
 
   // Keep the view where the reader expects it
   useEffect(() => {
@@ -1271,9 +1347,29 @@ const ChatModal = ({
       <div className="chat-modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="chat-modal-header">
           <div className="chat-header-info">
-            <h3>💬 Chat with {sellerName || 'Seller'}</h3>
+                        <h3>💬 Chat with {sellerName || 'Seller'}</h3>
 
-            {listingTitle && <p className="chat-listing-title">About: {listingTitle}</p>}
+            {listingId ? (
+              <div className="chat-item-card">
+                {parseImages(item?.image_url)[0] && (
+                  <img src={thumb(parseImages(item.image_url)[0], 120)} alt="" />
+                )}
+                <div className="chat-item-info">
+                  <span className="chat-item-label">About this item</span>
+                  <strong>{item?.title || listingTitle || 'Item'}</strong>
+                  {item && (
+                    <span className="chat-item-meta">
+                      ZMW {item.price}
+                      {item.is_sold ? ' · Sold' : ''}
+                      {item.available === false ? ' · No longer available' : ''}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <p className="chat-listing-title">💬 General chat (not about a specific item)</p>
+            )}
+
 
             <div className="chat-header-links">
               <button className="link-btn" onClick={() => onViewProfile?.(otherId)}>
@@ -1291,6 +1387,29 @@ const ChatModal = ({
             ×
           </button>
         </div>
+
+                {otherThreads.length > 0 && (
+          <div className="chat-threads" aria-label="Other chats with this person">
+            <span className="chat-threads-label">Other chats with {sellerName || 'them'}:</span>
+            {otherThreads.map((c) => (
+              <button
+                key={c.listing_id ?? 'general'}
+                type="button"
+                className="chat-thread-chip"
+                onClick={() =>
+                  onSwitchThread?.(c.listing_id || null, c.listing_title || '')
+                }
+              >
+                {c.listing_id || c.listing_title
+                  ? `📦 ${c.listing_title || 'Item'}`
+                  : '💬 General'}
+                {Number(c.unread_count) > 0 && (
+                  <span className="chip-unread">{c.unread_count}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
 
         {confirmBlock && (
           <div className="chat-notice chat-notice-warn" role="alert">
@@ -1329,9 +1448,15 @@ const ChatModal = ({
               <p>Loading messages...</p>
             </div>
           ) : messages.length === 0 ? (
-            <div className="chat-empty">
+                        <div className="chat-empty">
               <span>💬</span>
-              <p>No messages yet. Start the conversation!</p>
+              <p>
+                {listingId
+                  ? `No messages yet. Ask ${sellerName || 'the seller'} about "${
+                      item?.title || listingTitle || 'this item'
+                    }".`
+                  : 'No messages yet. Start the conversation!'}
+              </p>
             </div>
           ) : (
             <>
@@ -1346,8 +1471,12 @@ const ChatModal = ({
 
                 return (
                   <div key={msg.id} className={`chat-message ${isSent ? 'sent' : 'received'}`}>
-                    <div className="message-bubble">
+                                        <div className="message-bubble">
                       <span className="sender-name">{msg.sender_name || 'Student'}</span>
+                      {!listingId && msg.listing_title && (
+                        <span className="message-about">re: {msg.listing_title}</span>
+                      )}
+
 
                       <span className="message-text">{msg.message}</span>
 
@@ -4027,7 +4156,11 @@ function App() {
       if (event !== 'message' || Number(payload.receiver_id) !== myId) return;
 
       const open = chatModalRef.current;
-      if (open?.isOpen && Number(open.sellerId) === Number(payload.sender_id)) {
+            if (
+        open?.isOpen &&
+        Number(open.sellerId) === Number(payload.sender_id) &&
+        Number(open.listingId || 0) === Number(payload.listing_id || 0)
+      ) {
         return; // the open chat window marks it as read
       }
 
@@ -4045,7 +4178,12 @@ function App() {
         });
       }
 
-      showToast(`📩 New message from ${payload.sender_name || 'a student'}`, 'info');
+            showToast(
+        `📩 New message from ${payload.sender_name || 'a student'}${
+          payload.listing_title ? ` about "${payload.listing_title}"` : ''
+        }`,
+        'info'
+      );
     },
     [currentUserId, emitChat, showToast]
   );
@@ -4653,8 +4791,17 @@ function App() {
           currentUser={currentUser}
           API_BASE={API_BASE}
           subscribe={subscribeChat}
-          onRead={handleChatRead}
+                    onRead={handleChatRead}
           onViewProfile={handleViewSeller}
+          onSwitchThread={(lid, title) =>
+            handleOpenChat(
+              chatModal.sellerId,
+              lid,
+              chatModal.sellerName,
+              false,
+              title
+            )
+          }
         />
 
         {/* SELLER PROFILE */}

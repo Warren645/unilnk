@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import './App.css';
 
 // ==================== API BASE URL ====================
@@ -1524,6 +1525,56 @@ const ChatModal = ({
   );
 };
 
+// Full-resolution photo viewer, rendered outside the card's transformed container.
+const ListingPhotoViewer = ({ images, initialIndex, title, onClose }) => {
+  const dialogRef = useRef(null);
+  const [index, setIndex] = useState(initialIndex);
+  const [zoomed, setZoomed] = useState(false);
+  const move = (direction) => {
+    setIndex((previous) => (previous + direction + images.length) % images.length);
+    setZoomed(false);
+  };
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const previousFocus = document.activeElement;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    dialog.showModal();
+    return () => {
+      dialog.close();
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, []);
+
+  return createPortal(
+    <dialog ref={dialogRef} className="listing-photo-viewer" aria-label={`${title} photos`}
+      onCancel={(event) => { event.preventDefault(); onClose(); }}
+      onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
+      onKeyDown={(event) => {
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+          event.preventDefault();
+          move(event.key === 'ArrowLeft' ? -1 : 1);
+        }
+      }}>
+      <div className="photo-viewer-toolbar">
+        <div><strong>{title}</strong><span aria-live="polite">Photo {index + 1} of {images.length}</span></div>
+        <button type="button" onClick={() => setZoomed(!zoomed)} aria-pressed={zoomed}>{zoomed ? 'Fit photo' : 'Zoom in'}</button>
+        <button type="button" onClick={onClose} aria-label="Close photo viewer" autoFocus>✕</button>
+      </div>
+      <div className={`photo-viewer-stage ${zoomed ? 'is-zoomed' : ''}`}>
+        <img key={index} src={images[index]} alt={`${title} — photo ${index + 1}`}
+          onClick={() => setZoomed(!zoomed)} />
+      </div>
+      {images.length > 1 && <div className="photo-viewer-navigation">
+        <button type="button" onClick={() => move(-1)} aria-label="Previous photo">‹ Previous</button>
+        <button type="button" onClick={() => move(1)} aria-label="Next photo">Next ›</button>
+      </div>}
+    </dialog>, document.body
+  );
+};
+
 // ============ LISTING CARD ============
 const ListingCard = ({
   item,
@@ -1536,6 +1587,7 @@ const ListingCard = ({
 }) => {
   const [activeImgIndex, setActiveImgIndex] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
+  const [photoViewerOpen, setPhotoViewerOpen] = useState(false);
 
   let images = [];
 
@@ -1594,6 +1646,8 @@ const ListingCard = ({
         transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
       }}
     >
+      {photoViewerOpen && <ListingPhotoViewer images={images} initialIndex={activeImgIndex}
+        title={item.title} onClose={() => setPhotoViewerOpen(false)} />}
       <div>
         <div
           style={{
@@ -1607,6 +1661,8 @@ const ListingCard = ({
           }}
         >
           {images.length > 0 && images[activeImgIndex] ? (
+            <button type="button" className="listing-photo-open" onClick={() => setPhotoViewerOpen(true)}
+              aria-label={`View ${item.title} photos full size`}>
             <img
                             src={thumb(images[activeImgIndex], 600)}
               loading="lazy"
@@ -1620,6 +1676,8 @@ const ListingCard = ({
                 e.target.style.display = 'none';
               }}
             />
+            <span className="listing-photo-hint">⤢ View photo</span>
+            </button>
           ) : (
             <span
               style={{

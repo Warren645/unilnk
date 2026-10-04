@@ -2532,3 +2532,24 @@
   font-size: 10px; font-weight: 700; text-align: center; line-height: 16px;
 }
 .message-about { display: block; font-size: 10px; opacity: 0.75; margin-bottom: 2px; font-style: italic; }
+
+/* Listing photos: clickable previews and full-resolution modal. */
+.listing-photo-open { width: 100%; height: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; position: relative; }
+.listing-photo-open:focus-visible { outline: 3px solid #34d399; outline-offset: -3px; }
+.listing-photo-hint { position: absolute; bottom: 12px; right: 10px; padding: 5px 9px; border-radius: 8px; background: rgba(0,0,0,.75); color: white; font-size: 12px; pointer-events: none; }
+.sold-overlay { pointer-events: none; }
+.listing-photo-viewer { position: fixed; inset: 0; margin: auto; width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; padding: 0; border: 0; background: #080c12; color: #fff; }
+.listing-photo-viewer[open] { display: flex; flex-direction: column; }
+.listing-photo-viewer::backdrop { background: rgba(0,0,0,.95); }
+.photo-viewer-toolbar { display: flex; align-items: center; gap: 12px; padding: 16px; flex-shrink: 0; }
+.photo-viewer-toolbar > div { flex: 1; min-width: 0; }
+.photo-viewer-toolbar strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.photo-viewer-toolbar span { display: block; color: #b7c3ce; font-size: 13px; margin-top: 4px; }
+.listing-photo-viewer button { min-height: 44px; min-width: 44px; border: 1px solid #46515d; border-radius: 8px; background: #17212d; color: white; padding: 8px 14px; cursor: pointer; }
+.listing-photo-viewer button:focus-visible { outline: 3px solid #34d399; outline-offset: 2px; }
+.photo-viewer-stage { flex: 1; min-height: 0; overflow: auto; display: flex; align-items: center; justify-content: center; padding: 12px; }
+.photo-viewer-stage img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; }
+.photo-viewer-stage.is-zoomed { display: block; }
+.photo-viewer-stage.is-zoomed img { max-width: none; max-height: none; width: 200%; cursor: zoom-out; }
+.photo-viewer-navigation { display: flex; justify-content: center; gap: 16px; padding: 12px 16px max(16px, env(safe-area-inset-bottom)); }
+@media (max-width: 480px) { .photo-viewer-toolbar { padding: 10px; gap: 8px; } .photo-viewer-toolbar strong { font-size: 14px; } .listing-photo-viewer button { padding: 8px 10px; } }

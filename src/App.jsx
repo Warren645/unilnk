@@ -299,10 +299,12 @@ const IdleWarningModal = ({ secondsLeft, onStay, onLogout }) => (
 // ==================== TOAST HOOK ====================
 const useToast = () => {
   const [toast, setToast] = useState(null);
+  const timer = useRef(null);
 
   const showToast = useCallback((message, type = 'success', duration = 3500) => {
+    clearTimeout(timer.current);
     setToast({ message, type });
-    setTimeout(() => setToast(null), duration);
+    timer.current = setTimeout(() => setToast(null), duration);
   }, []);
 
   return { toast, showToast };
@@ -327,57 +329,635 @@ const Toast = ({ toast }) => {
 };
 
 // ============ CHAT INBOX COMPONENT ============
-const ChatInbox = ({ currentUser, onOpenChat, API_BASE }) => {
-  const [conversations, setConversations] = useState([]);
-  const [totalUnread, setTotalUnread] = useState(0);
-  const [isLoading, setIsLoading] = useState(true);
+// ==================== SMALL HELPERS ====================
+
+// Cloudinary can resize images on delivery. Asking for a smaller version
+// makes pages much lighter on mobile data.
+const thumb = (url, width = 600) => {
+  if (typeof url !== 'string') return url;
+  if (!url.includes('res.cloudinary.com') || !url.includes('/upload/')) return url;
+  if (/\/upload\/[^/]*(?:w_|c_|q_|f_)[^/]*\//.test(url)) return url;
+  return url.replace('/upload/', `/upload/w_${width},c_limit,q_auto,f_auto/`);
+};
+
+const REPORT_REASONS = [
+  'Scam or fraud',
+  'Prohibited item',
+  'Inappropriate content',
+  'Fake or misleading',
+  'Spam or duplicate',
+  'Wrong category',
+  'Other',
+];
+
+const formatMonthYear = (value) => {
+  if (!value) return '';
+  const d = new Date(value);
+  return Number.isNaN(d.getTime())
+    ? ''
+    : d.toLocaleDateString([], { month: 'short', year: 'numeric' });
+};
+
+const formatShortDate = (value) => {
+  if (!value) return '';
+  const d = new Date(value);
+  return Number.isNaN(d.getTime())
+    ? ''
+    : d.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
+};
+
+// ==================== LIVE CHAT STREAM ====================
+/*
+  Keeps one streaming connection open to the server so new messages arrive
+  instantly (no polling). EventSource can't send the login token, so this uses
+  fetch. If the connection drops it reconnects with a growing delay.
+*/
+const useChatStream = ({ enabled, onEvent, onOpen, onAuthError }) => {
+  const handlers = useRef({ onEvent, onOpen, onAuthError });
 
   useEffect(() => {
-    if (currentUser) {
-      fetchConversations();
+    handlers.current = { onEvent, onOpen, onAuthError };
+  });
 
-      const interval = setInterval(fetchConversations, 5000);
-      return () => clearInterval(interval);
+  useEffect(() => {
+    if (!enabled) return undefined;
+
+    let stopped = false;
+    let controller = null;
+    let retry = 0;
+    let timer = null;
+
+    const connect = async () => {
+      if (stopped) return;
+      controller = new AbortController();
+
+      try {
+        const res = await fetch(`${API_BASE}/api/chat/stream`, {
+          headers: { ...getAuthHeaders(), Accept: 'text/event-stream' },
+          signal: controller.signal,
+        });
+
+        if (res.status === 401 || res.status === 403) {
+          let body = {};
+          try {
+            body = await res.json();
+          } catch (err) {
+            /* not JSON */
+          }
+          stopped = true;
+          handlers.current.onAuthError?.(res.status, body);
+          return;
+        }
+
+        if (!res.ok || !res.body) throw new Error(`Stream status ${res.status}`);
+
+        retry = 0;
+        handlers.current.onOpen?.();
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          let end;
+          while ((end = buffer.indexOf('\n\n')) !== -1) {
+            const block = buffer.slice(0, end);
+            buffer = buffer.slice(end + 2);
+
+            let event = 'message';
+            let data = '';
+            block.split('\n').forEach((line) => {
+              if (line.startsWith('event:')) event = line.slice(6).trim();
+              else if (line.startsWith('data:')) data += line.slice(5).trim();
+            });
+
+            if (data) {
+              try {
+                handlers.current.onEvent?.(event, JSON.parse(data));
+              } catch (err) {
+                /* ignore a malformed event */
+              }
+            }
+          }
+        }
+      } catch (err) {
+        if (stopped) return;
+      }
+
+      if (stopped) return;
+      retry = Math.min(retry + 1, 6);
+      timer = setTimeout(connect, Math.min(30000, 1000 * 2 ** retry));
+    };
+
+    connect();
+
+    return () => {
+      stopped = true;
+      if (controller) controller.abort();
+      clearTimeout(timer);
+    };
+  }, [enabled]);
+};
+
+// ==================== STAR RATING ====================
+const Stars = ({ value = 0, onChange, size = 16 }) => {
+  const rounded = Math.round(value || 0);
+
+  return (
+    <span className={`stars ${onChange ? 'stars-input' : ''}`} style={{ fontSize: size }}>
+      {[1, 2, 3, 4, 5].map((n) =>
+        onChange ? (
+          <button
+            key={n}
+            type="button"
+            className={`star-btn ${n <= rounded ? 'on' : ''}`}
+            onClick={() => onChange(n)}
+            aria-label={`${n} star${n === 1 ? '' : 's'}`}
+            aria-pressed={n === rounded}
+          >
+            ★
+          </button>
+        ) : (
+          <span key={n} className={`star ${n <= rounded ? 'on' : ''}`} aria-hidden="true">
+            ★
+          </span>
+        )
+      )}
+    </span>
+  );
+};
+
+const RatingLine = ({ rating, count, size = 13 }) =>
+  count > 0 ? (
+    <span className="rating-line" title={`${rating} out of 5 from ${count} review${count === 1 ? '' : 's'}`}>
+      <Stars value={rating} size={size} />
+      <span className="rating-num">
+        {Number(rating).toFixed(1)} ({count})
+      </span>
+    </span>
+  ) : (
+    <span className="rating-line rating-none">No reviews yet</span>
+  );
+
+// ==================== REPORT A LISTING ====================
+const ReportModal = ({ item, onClose, showToast }) => {
+  const [reason, setReason] = useState('');
+  const [details, setDetails] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const [formError, setFormError] = useState('');
+
+  if (!item) return null;
+
+  const submit = async (e) => {
+    e.preventDefault();
+
+    if (!reason) {
+      setFormError('Please choose a reason.');
+      return;
     }
-  }, [currentUser]);
 
-  const fetchConversations = async () => {
+    setIsSending(true);
+    setFormError('');
+
+    try {
+      const res = await fetch(`${API_BASE}/api/listings/${item.id}/report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ reason, details }),
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        showToast('Thanks. A moderator will review this listing.', 'success');
+        onClose();
+      } else {
+        setFormError(data.error || 'Could not send your report.');
+      }
+    } catch (err) {
+      setFormError('Connection error. Please try again.');
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={isSending ? undefined : onClose}>
+      <div className="modal-content report-modal" onClick={(e) => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose} aria-label="Close">
+          ×
+        </button>
+        <h3 className="adm-modal-title">Report this listing</h3>
+        <p className="adm-modal-sub">
+          <strong>{item.title}</strong>
+          <br />
+          Reports are private. Moderators will review the listing.
+        </p>
+
+        {formError && (
+          <div className="auth-error" role="alert">
+            {formError}
+          </div>
+        )}
+
+        <form onSubmit={submit}>
+          <div className="adm-reasons">
+            {REPORT_REASONS.map((r) => (
+              <button
+                key={r}
+                type="button"
+                className={`adm-reason ${reason === r ? 'active' : ''}`}
+                onClick={() => setReason(r)}
+              >
+                {r}
+              </button>
+            ))}
+          </div>
+          <label className="adm-modal-label" htmlFor="report-details">
+            Details (optional)
+          </label>
+          <textarea
+            id="report-details"
+            className="form-textarea"
+            rows="3"
+            maxLength={500}
+            placeholder="What is wrong with this listing?"
+            value={details}
+            onChange={(e) => setDetails(e.target.value)}
+          />
+          <div className="adm-modal-actions">
+            <button type="button" className="adm-btn adm-btn-ghost" onClick={onClose} disabled={isSending}>
+              Cancel
+            </button>
+            <button type="submit" className="adm-btn adm-btn-danger solid" disabled={!reason || isSending}>
+              {isSending ? 'Sending...' : 'Send report'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// ==================== SELLER PROFILE ====================
+const SellerProfileModal = ({
+  sellerId,
+  onClose,
+  currentUser,
+  isAdmin,
+  onOpenChat,
+  onRequireLogin,
+  showToast,
+}) => {
+  const [data, setData] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [formError, setFormError] = useState('');
+
+  const load = useCallback(async () => {
+    if (!sellerId) return;
+    setIsLoading(true);
+    setLoadError('');
+
+    try {
+      const res = await fetch(`${API_BASE}/api/sellers/${sellerId}`, {
+        headers: { ...getAuthHeaders() },
+      });
+      const body = await res.json();
+
+      if (res.ok && body.success) {
+        setData(body);
+        setRating(body.viewer?.my_review?.rating || 0);
+        setComment(body.viewer?.my_review?.comment || '');
+      } else {
+        setLoadError(body.error || 'Could not load this profile.');
+      }
+    } catch (err) {
+      setLoadError('Connection error. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [sellerId]);
+
+  useEffect(() => {
+    setData(null);
+    load();
+  }, [load]);
+
+  if (!sellerId) return null;
+
+  const submitReview = async (e) => {
+    e.preventDefault();
+
+    if (!rating) {
+      setFormError('Please choose a star rating.');
+      return;
+    }
+
+    setIsSaving(true);
+    setFormError('');
+
+    try {
+      const res = await fetch(`${API_BASE}/api/sellers/${sellerId}/reviews`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ rating, comment }),
+      });
+      const body = await res.json();
+
+      if (res.ok && body.success) {
+        showToast('Review saved. Thank you!', 'success');
+        load();
+      } else {
+        setFormError(body.error || 'Could not save your review.');
+      }
+    } catch (err) {
+      setFormError('Connection error. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const deleteMine = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/sellers/${sellerId}/reviews`, {
+        method: 'DELETE',
+        headers: { ...getAuthHeaders() },
+      });
+      if (res.ok) {
+        setRating(0);
+        setComment('');
+        load();
+      }
+    } catch (err) {
+      setFormError('Connection error. Please try again.');
+    }
+  };
+
+  const removeReview = async (reviewId) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/reviews/${reviewId}`, {
+        method: 'DELETE',
+        headers: { ...getAuthHeaders() },
+      });
+      if (res.ok) {
+        showToast('Review removed.', 'success');
+        load();
+      } else {
+        showToast('Could not remove the review.', 'error');
+      }
+    } catch (err) {
+      showToast('Connection error.', 'error');
+    }
+  };
+
+  const seller = data?.seller;
+  const viewer = data?.viewer;
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content profile-modal" onClick={(e) => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose} aria-label="Close">
+          ×
+        </button>
+
+        {isLoading && !data ? (
+          <p className="profile-loading">Loading profile...</p>
+        ) : loadError ? (
+          <div className="profile-loading">
+            <p>{loadError}</p>
+            <button className="adm-btn adm-btn-ghost" onClick={load}>
+              Try again
+            </button>
+          </div>
+        ) : (
+          data && (
+            <>
+              <div className="profile-head">
+                <div className="profile-avatar">{(seller.full_name || 'U').charAt(0)}</div>
+                <div className="profile-head-info">
+                  <h3>{seller.full_name}</h3>
+                  <RatingLine rating={data.stats.rating} count={data.stats.review_count} size={15} />
+                  <p className="profile-sub">
+                    Member since {formatMonthYear(seller.joined)} · {data.stats.active_count} for sale ·{' '}
+                    {data.stats.sold_count} sold
+                  </p>
+                </div>
+              </div>
+
+              {!viewer.is_self && (
+                <button
+                  className="profile-message-btn"
+                  onClick={() => {
+                    if (!currentUser) {
+                      onRequireLogin();
+                      return;
+                    }
+                    onOpenChat(seller.id, null, seller.full_name);
+                    onClose();
+                  }}
+                >
+                  💬 Message {seller.full_name.split(' ')[0]}
+                </button>
+              )}
+
+              <h4 className="profile-section">For sale now ({data.listings.length})</h4>
+              {data.listings.length === 0 ? (
+                <p className="profile-empty">Nothing for sale right now.</p>
+              ) : (
+                <div className="profile-listings">
+                  {data.listings.map((l) => {
+                    const imgs = parseImages(l.image_url);
+                    return (
+                      <button
+                        key={l.id}
+                        className="profile-listing"
+                        onClick={() => {
+                          if (viewer.is_self) return;
+                          if (!currentUser) {
+                            onRequireLogin();
+                            return;
+                          }
+                          onOpenChat(seller.id, l.id, seller.full_name, false, l.title);
+                          onClose();
+                        }}
+                        title={viewer.is_self ? l.title : `Ask about ${l.title}`}
+                      >
+                        <span className="profile-listing-img">
+                          {imgs[0] ? <img src={thumb(imgs[0], 300)} alt="" loading="lazy" /> : <span>No photo</span>}
+                        </span>
+                        <span className="profile-listing-title">{l.title}</span>
+                        <span className="profile-listing-price">ZMW {l.price}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              <h4 className="profile-section">Sold history ({data.stats.sold_count})</h4>
+              {data.sold.length === 0 ? (
+                <p className="profile-empty">No completed sales yet.</p>
+              ) : (
+                <ul className="profile-sold">
+                  {data.sold.map((s) => (
+                    <li key={s.id}>
+                      <span>✓ {s.title}</span>
+                      <span className="profile-sold-meta">
+                        ZMW {s.price}
+                        {s.sold_at ? ` · ${formatShortDate(s.sold_at)}` : ''}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <h4 className="profile-section">Reviews ({data.stats.review_count})</h4>
+
+              {viewer.is_self ? (
+                <p className="profile-empty">This is how other students see your profile.</p>
+              ) : !currentUser ? (
+                <p className="profile-empty">
+                  <button className="link-btn" onClick={onRequireLogin}>
+                    Sign in
+                  </button>{' '}
+                  to leave a review.
+                </p>
+              ) : viewer.can_review ? (
+                <form className="review-form" onSubmit={submitReview}>
+                  <p className="review-form-title">
+                    {viewer.my_review ? 'Your review' : 'Leave a review'}
+                  </p>
+                  {formError && (
+                    <div className="auth-error" role="alert">
+                      {formError}
+                    </div>
+                  )}
+                  <Stars value={rating} onChange={setRating} size={26} />
+                  <textarea
+                    className="form-textarea"
+                    rows="2"
+                    maxLength={500}
+                    placeholder="How was your experience? (optional)"
+                    value={comment}
+                    onChange={(e) => setComment(e.target.value)}
+                  />
+                  <div className="review-actions">
+                    <button type="submit" className="adm-btn adm-btn-primary" disabled={isSaving || !rating}>
+                      {isSaving ? 'Saving...' : viewer.my_review ? 'Update review' : 'Submit review'}
+                    </button>
+                    {viewer.my_review && (
+                      <button type="button" className="adm-btn adm-btn-ghost" onClick={deleteMine}>
+                        Delete my review
+                      </button>
+                    )}
+                  </div>
+                </form>
+              ) : (
+                <p className="profile-empty">{viewer.review_hint}</p>
+              )}
+
+              {data.reviews.length === 0 ? (
+                <p className="profile-empty">No reviews yet.</p>
+              ) : (
+                <ul className="profile-reviews">
+                  {data.reviews.map((r) => (
+                    <li key={r.id}>
+                      <div className="review-top">
+                        <Stars value={r.rating} size={14} />
+                        <strong>{r.reviewer_name}</strong>
+                        <span className="profile-sold-meta">{formatShortDate(r.created_at)}</span>
+                        {isAdmin && (
+                          <button className="link-btn danger" onClick={() => removeReview(r.id)}>
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                      {r.comment && <p className="review-comment">{r.comment}</p>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )
+        )}
+      </div>
+    </div>
+  );
+};
+
+const ChatInbox = ({ currentUser, onOpenChat, API_BASE, subscribe }) => {
+  const [conversations, setConversations] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const refreshTimer = useRef(null);
+
+  const fetchConversations = useCallback(async () => {
     const userId = currentUser?.id || currentUser?.user?.id;
     if (!userId) return;
 
     try {
-      const res = await fetch(
-        `${API_BASE}/api/chat/conversations/${userId}`,
-        {
-          headers: {
-            ...getAuthHeaders(),
-          },
-        }
-      );
-
+      const res = await fetch(`${API_BASE}/api/chat/conversations/${userId}`, {
+        headers: { ...getAuthHeaders() },
+      });
       const data = await res.json();
 
-      if (data.success) {
+      if (res.ok && data.success) {
         setConversations(data.conversations);
-
-        const total = data.conversations.reduce(
-          (sum, conv) => sum + (conv.unread_count || 0),
-          0
-        );
-
-        setTotalUnread(total);
+        setLoadError('');
+      } else {
+        setLoadError(data.error || 'Could not load your messages.');
       }
     } catch (err) {
-      console.error('Failed to fetch conversations:', err);
+      setLoadError('Connection error. Retrying...');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [currentUser, API_BASE]);
+
+  useEffect(() => {
+    if (!currentUser) return undefined;
+
+    fetchConversations();
+
+    // Safety net only: new messages arrive instantly through the live stream
+    const interval = setInterval(fetchConversations, 30000);
+    return () => clearInterval(interval);
+  }, [currentUser, fetchConversations]);
+
+  useEffect(() => {
+    if (!subscribe) return undefined;
+
+    return subscribe(() => {
+      clearTimeout(refreshTimer.current);
+      refreshTimer.current = setTimeout(fetchConversations, 250);
+    });
+  }, [subscribe, fetchConversations]);
+
+  useEffect(() => () => clearTimeout(refreshTimer.current), []);
+
+  const totalUnread = conversations.reduce(
+    (sum, conv) => sum + (Number(conv.unread_count) || 0),
+    0
+  );
 
   if (isLoading) {
+    return <div className="chat-inbox-loading">Loading conversations...</div>;
+  }
+
+  if (loadError && conversations.length === 0) {
     return (
-      <div className="chat-inbox-loading">
-        Loading conversations...
+      <div className="chat-inbox-empty">
+        <p>{loadError}</p>
+        <button className="adm-btn adm-btn-ghost" onClick={fetchConversations}>
+          Try again
+        </button>
       </div>
     );
   }
@@ -399,68 +979,71 @@ const ChatInbox = ({ currentUser, onOpenChat, API_BASE }) => {
       <div className="chat-inbox-header">
         <h3>💬 Messages</h3>
 
-        {totalUnread > 0 && (
-          <span className="unread-badge">
-            {totalUnread} unread
-          </span>
-        )}
+        {totalUnread > 0 && <span className="unread-badge">{totalUnread} unread</span>}
       </div>
 
       <div className="conversations-list">
-        {conversations.map((conv) => (
-          <div
-            key={conv.user_id}
-            className={`conversation-item ${
-              conv.unread_count > 0 ? 'has-unread' : ''
-            }`}
-            onClick={() =>
-              onOpenChat(conv.user_id, null, conv.user_name)
-            }
-          >
-            <div className="conversation-avatar">
-              <span>{conv.user_name?.charAt(0) || 'U'}</span>
+        {conversations.map((conv) => {
+          const unread = Number(conv.unread_count) || 0;
+          const blocked = conv.blocked_by_me || conv.blocked_me;
 
-              {conv.unread_count > 0 && (
-                <span className="unread-dot">
-                  {conv.unread_count}
-                </span>
-              )}
-            </div>
+          return (
+            <div
+              key={conv.user_id}
+              className={`conversation-item ${unread > 0 ? 'has-unread' : ''}`}
+              onClick={() => onOpenChat(conv.user_id, null, conv.user_name)}
+            >
+              <div className="conversation-avatar">
+                <span>{conv.user_name?.charAt(0) || 'U'}</span>
 
-            <div className="conversation-info">
-              <div className="conversation-name">
-                {conv.user_name || 'UNILUS Student'}
+                {unread > 0 && <span className="unread-dot">{unread}</span>}
               </div>
 
-              <div className="conversation-last-message">
-                {conv.last_message || 'No messages yet'}
-              </div>
-
-              {conv.listing_title && (
-                <div className="conversation-listing">
-                  📦 {conv.listing_title}
+              <div className="conversation-info">
+                <div className="conversation-name">
+                  {conv.user_name || 'UNILUS Student'}
+                  {conv.blocked_by_me && <span className="blocked-tag">Blocked</span>}
                 </div>
-              )}
-            </div>
 
-            <div className="conversation-time">
-              {conv.last_message_time && (
-                <span>
-                  {new Date(conv.last_message_time).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </span>
-              )}
+                <div className="conversation-last-message">
+                  {blocked ? 'Messaging unavailable' : conv.last_message || 'No messages yet'}
+                </div>
+
+                {conv.listing_title && (
+                  <div className="conversation-listing">📦 {conv.listing_title}</div>
+                )}
+              </div>
+
+              <div className="conversation-time">
+                {conv.last_message_time && (
+                  <span>
+                    {new Date(conv.last_message_time).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
 };
 
 // ============ CHAT MODAL COMPONENT ============
+const mergeMessages = (current, incoming) => {
+  const byId = new Map();
+  [...current, ...incoming].forEach((m) => byId.set(m.id, m));
+
+  return [...byId.values()].sort(
+    (a, b) => new Date(a.created_at) - new Date(b.created_at) || a.id - b.id
+  );
+};
+
+const CHAT_PAGE_SIZE = 50;
+
 const ChatModal = ({
   isOpen,
   onClose,
@@ -470,168 +1053,308 @@ const ChatModal = ({
   listingTitle,
   currentUser,
   API_BASE,
+  subscribe,
+  onRead,
+  onViewProfile,
 }) => {
   const [messages, setMessages] = useState([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [newMessage, setNewMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [blocked, setBlocked] = useState({ byMe: false, me: false });
+  const [confirmBlock, setConfirmBlock] = useState(false);
+  const [chatError, setChatError] = useState('');
 
-  const { showToast } = useToast();
-  const messagesEndRef = useRef(null);
+  const containerRef = useRef(null);
+  const endRef = useRef(null);
+  const stickRef = useRef(true);
+  const prependRef = useRef(null);
 
-  useEffect(() => {
-    if (isOpen && sellerId && currentUser) {
-      fetchMessages();
-      markAsRead();
+  const userId = currentUser?.id || currentUser?.user?.id;
+  const otherId = Number(sellerId);
 
-      const interval = setInterval(fetchMessages, 3000);
-      return () => clearInterval(interval);
-    }
-  }, [isOpen, sellerId, currentUser]);
+  const markAsRead = useCallback(async () => {
+    if (!userId || !otherId) return;
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({
-      behavior: 'smooth',
-    });
-  };
-
-  const fetchMessages = async () => {
     try {
-      const userId = currentUser?.id || currentUser?.user?.id;
-
-      const res = await fetch(
-        `${API_BASE}/api/chat/messages/${userId}/${sellerId}`,
-        {
-          headers: {
-            ...getAuthHeaders(),
-          },
-        }
-      );
-
-      const data = await res.json();
-
-      if (data.success) {
-        setMessages(data.messages || []);
-      }
-    } catch (err) {
-      console.error('Failed to fetch messages:', err);
-    }
-  };
-
-  const markAsRead = async () => {
-    try {
-      const userId = currentUser?.id || currentUser?.user?.id;
-
-      await fetch(
-        `${API_BASE}/api/chat/mark-read/${userId}/${sellerId}`,
-        {
-          method: 'PUT',
-          headers: {
-            ...getAuthHeaders(),
-          },
-        }
-      );
+      await fetch(`${API_BASE}/api/chat/mark-read/${userId}/${otherId}`, {
+        method: 'PUT',
+        headers: { ...getAuthHeaders() },
+      });
+      onRead?.();
     } catch (err) {
       console.error('Failed to mark messages as read:', err);
     }
+  }, [API_BASE, userId, otherId, onRead]);
+
+  // Newest messages first-page; "silent" refreshes merge instead of replacing
+  const loadLatest = useCallback(
+    async ({ silent = false } = {}) => {
+      if (!userId || !otherId) return;
+
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/chat/messages/${userId}/${otherId}?limit=${CHAT_PAGE_SIZE}`,
+          { headers: { ...getAuthHeaders() } }
+        );
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+          setMessages((prev) =>
+            silent ? mergeMessages(prev, data.messages || []) : data.messages || []
+          );
+          if (!silent) setHasMore(Boolean(data.has_more));
+          setBlocked({ byMe: Boolean(data.blocked_by_me), me: Boolean(data.blocked_me) });
+          if (!silent) setChatError('');
+        } else if (!silent) {
+          setChatError(data.error || 'Could not load messages.');
+        }
+      } catch (err) {
+        if (!silent) setChatError('Connection error. Could not load messages.');
+      } finally {
+        if (!silent) setIsLoading(false);
+      }
+    },
+    [API_BASE, userId, otherId]
+  );
+
+  const loadOlder = async () => {
+    if (isLoadingOlder || !hasMore) return;
+    setIsLoadingOlder(true);
+
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/chat/messages/${userId}/${otherId}?limit=${CHAT_PAGE_SIZE}&offset=${messages.length}`,
+        { headers: { ...getAuthHeaders() } }
+      );
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        if (containerRef.current) {
+          prependRef.current = containerRef.current.scrollHeight;
+        }
+        setMessages((prev) => mergeMessages(prev, data.messages || []));
+        setHasMore(Boolean(data.has_more));
+      } else {
+        setChatError(data.error || 'Could not load earlier messages.');
+      }
+    } catch (err) {
+      setChatError('Connection error. Could not load earlier messages.');
+    } finally {
+      setIsLoadingOlder(false);
+    }
+  };
+
+  // Open / switch conversation
+  useEffect(() => {
+    if (!isOpen || !otherId || !userId) return undefined;
+
+    setMessages([]);
+    setHasMore(false);
+    setIsLoading(true);
+    setChatError('');
+    setConfirmBlock(false);
+    setNewMessage('');
+    stickRef.current = true;
+
+    loadLatest();
+    markAsRead();
+
+    // Safety net only: messages normally arrive through the live stream
+    const interval = setInterval(() => loadLatest({ silent: true }), 20000);
+    return () => clearInterval(interval);
+  }, [isOpen, otherId, userId, loadLatest, markAsRead]);
+
+  // Live messages
+  useEffect(() => {
+    if (!isOpen || !subscribe || !otherId || !userId) return undefined;
+
+    return subscribe((event, payload) => {
+      if (event !== 'message') return;
+
+      const fromThem =
+        Number(payload.sender_id) === otherId && Number(payload.receiver_id) === Number(userId);
+      const fromMe =
+        Number(payload.sender_id) === Number(userId) && Number(payload.receiver_id) === otherId;
+
+      if (!fromThem && !fromMe) return;
+
+      setMessages((prev) => mergeMessages(prev, [payload]));
+      if (fromThem) markAsRead();
+    });
+  }, [isOpen, subscribe, otherId, userId, markAsRead]);
+
+  // Keep the view where the reader expects it
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    if (prependRef.current !== null) {
+      el.scrollTop += el.scrollHeight - prependRef.current;
+      prependRef.current = null;
+    } else if (stickRef.current) {
+      endRef.current?.scrollIntoView({ block: 'end' });
+    }
+  }, [messages]);
+
+  const handleScroll = () => {
+    const el = containerRef.current;
+    if (!el) return;
+    stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   };
 
   const sendMessage = async (e) => {
     e.preventDefault();
 
-    if (!newMessage.trim() || !currentUser) return;
+    const text = newMessage.trim();
+    if (!text || !currentUser || isSending) return;
 
     setIsSending(true);
+    setChatError('');
 
     try {
-      const userId = currentUser?.id || currentUser?.user?.id;
-
       const res = await fetch(`${API_BASE}/api/chat/send`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders(),
-        },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
-          sender_id: userId,
-          receiver_id: sellerId,
+          receiver_id: otherId,
           listing_id: listingId,
-          message: newMessage.trim(),
+          message: text,
         }),
       });
-
       const data = await res.json();
 
-      if (data.success) {
+      if (res.ok && data.success) {
         setNewMessage('');
-        fetchMessages();
+        stickRef.current = true;
+        setMessages((prev) => mergeMessages(prev, [data.message]));
       } else {
-        showToast(data.error || 'Failed to send message', 'error');
+        if (data.code === 'BLOCKED') setBlocked((b) => ({ ...b, me: true }));
+        setChatError(data.error || 'Failed to send message');
       }
     } catch (err) {
-      showToast('Connection error', 'error');
+      setChatError('Connection error. Your message was not sent.');
     } finally {
       setIsSending(false);
     }
   };
 
+  const changeBlock = async (shouldBlock) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/blocks/${otherId}`, {
+        method: shouldBlock ? 'POST' : 'DELETE',
+        headers: { ...getAuthHeaders() },
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        setBlocked((b) => ({ ...b, byMe: shouldBlock }));
+        setConfirmBlock(false);
+        setChatError('');
+        onRead?.();
+      } else {
+        setChatError(data.error || 'Could not update the block.');
+      }
+    } catch (err) {
+      setChatError('Connection error. Please try again.');
+    }
+  };
+
   if (!isOpen) return null;
+
+  const canSend = !blocked.byMe && !blocked.me;
 
   return (
     <div className="chat-modal-overlay" onClick={onClose}>
-      <div
-        className="chat-modal-content"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="chat-modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="chat-modal-header">
           <div className="chat-header-info">
             <h3>💬 Chat with {sellerName || 'Seller'}</h3>
 
-            {listingTitle && (
-              <p className="chat-listing-title">
-                About: {listingTitle}
-              </p>
-            )}
+            {listingTitle && <p className="chat-listing-title">About: {listingTitle}</p>}
+
+            <div className="chat-header-links">
+              <button className="link-btn" onClick={() => onViewProfile?.(otherId)}>
+                View profile
+              </button>
+              {!blocked.byMe && (
+                <button className="link-btn danger" onClick={() => setConfirmBlock((v) => !v)}>
+                  Block
+                </button>
+              )}
+            </div>
           </div>
 
-          <button className="modal-close-btn" onClick={onClose}>
+          <button className="modal-close-btn" onClick={onClose} aria-label="Close chat">
             ×
           </button>
         </div>
 
-        <div className="chat-messages-container">
-          {messages.length === 0 ? (
+        {confirmBlock && (
+          <div className="chat-notice chat-notice-warn" role="alert">
+            <span>
+              Block {sellerName || 'this user'}? Neither of you will be able to send messages.
+            </span>
+            <span className="chat-notice-actions">
+              <button className="adm-btn adm-btn-danger solid" onClick={() => changeBlock(true)}>
+                Block
+              </button>
+              <button className="adm-btn adm-btn-ghost" onClick={() => setConfirmBlock(false)}>
+                Cancel
+              </button>
+            </span>
+          </div>
+        )}
+
+        {blocked.byMe && (
+          <div className="chat-notice" role="status">
+            <span>You blocked this user.</span>
+            <button className="adm-btn adm-btn-ghost" onClick={() => changeBlock(false)}>
+              Unblock
+            </button>
+          </div>
+        )}
+
+        {blocked.me && !blocked.byMe && (
+          <div className="chat-notice" role="status">
+            <span>You can't send messages to this user.</span>
+          </div>
+        )}
+
+        <div className="chat-messages-container" ref={containerRef} onScroll={handleScroll}>
+          {isLoading ? (
+            <div className="chat-empty">
+              <p>Loading messages...</p>
+            </div>
+          ) : messages.length === 0 ? (
             <div className="chat-empty">
               <span>💬</span>
               <p>No messages yet. Start the conversation!</p>
             </div>
           ) : (
             <>
-              {messages.map((msg, index) => {
-                const userId = currentUser?.id || currentUser?.user?.id;
-                const isSent = msg.sender_id === userId;
+              {hasMore && (
+                <button className="load-older-btn" onClick={loadOlder} disabled={isLoadingOlder}>
+                  {isLoadingOlder ? 'Loading...' : 'Load earlier messages'}
+                </button>
+              )}
+
+              {messages.map((msg) => {
+                const isSent = Number(msg.sender_id) === Number(userId);
 
                 return (
-                  <div
-                    key={index}
-                    className={`chat-message ${
-                      isSent ? 'sent' : 'received'
-                    }`}
-                  >
+                  <div key={msg.id} className={`chat-message ${isSent ? 'sent' : 'received'}`}>
                     <div className="message-bubble">
-                      <span className="sender-name">
-                        {msg.sender_name || 'Student'}
-                      </span>
+                      <span className="sender-name">{msg.sender_name || 'Student'}</span>
 
-                      <span className="message-text">
-                        {msg.message}
-                      </span>
+                      <span className="message-text">{msg.message}</span>
 
                       <span className="message-time">
-                        {new Date(msg.created_at).toLocaleTimeString([], {
+                        {new Date(msg.created_at).toLocaleString([], {
+                          day: 'numeric',
+                          month: 'short',
                           hour: '2-digit',
                           minute: '2-digit',
                         })}
@@ -641,26 +1364,29 @@ const ChatModal = ({
                 );
               })}
 
-              <div ref={messagesEndRef} />
+              <div ref={endRef} />
             </>
           )}
         </div>
 
+        {chatError && (
+          <div className="chat-notice chat-notice-error" role="alert">
+            {chatError}
+          </div>
+        )}
+
         <form onSubmit={sendMessage} className="chat-input-form">
           <input
             type="text"
-            placeholder="Type your message..."
+            placeholder={canSend ? 'Type your message...' : 'Messaging is unavailable'}
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
             className="chat-input"
-            disabled={isSending}
+            disabled={isSending || !canSend}
+            maxLength={2000}
           />
 
-          <button
-            type="submit"
-            className="chat-send-btn"
-            disabled={isSending}
-          >
+          <button type="submit" className="chat-send-btn" disabled={isSending || !canSend}>
             {isSending ? 'Sending...' : 'Send'}
           </button>
         </form>
@@ -674,7 +1400,10 @@ const ListingCard = ({
   item,
   onOpenChat,
   currentUser,
-  onViewSellerListings,
+  onViewSeller,
+  isFavorite = false,
+  onToggleFavorite,
+  onReport,
 }) => {
   const [activeImgIndex, setActiveImgIndex] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
@@ -699,12 +1428,19 @@ const ListingCard = ({
       return;
     }
 
-    onOpenChat(
+        onOpenChat(
       item.seller_id,
       item.id,
-      item.seller_name || 'Seller'
+      item.seller_name || 'Seller',
+      false,
+      item.title
     );
   };
+
+  const isOwn =
+    !!currentUser &&
+    Number(currentUser.id || currentUser.user?.id) === Number(item.seller_id);
+  const canChat = !!currentUser && !isOwn && !item.is_sold;
 
   return (
     <div
@@ -743,7 +1479,8 @@ const ListingCard = ({
         >
           {images.length > 0 && images[activeImgIndex] ? (
             <img
-              src={images[activeImgIndex]}
+                            src={thumb(images[activeImgIndex], 600)}
+              loading="lazy"
               alt={item.title}
               style={{
                 width: '100%',
@@ -783,6 +1520,19 @@ const ListingCard = ({
             📍 {item.campus || 'Silverest Main Campus'}
           </span>
 
+                    {currentUser && onToggleFavorite && (
+            <button
+              type="button"
+              className={`fav-btn ${isFavorite ? 'on' : ''}`}
+              onClick={() => onToggleFavorite(item)}
+              aria-label={isFavorite ? 'Remove from saved listings' : 'Save this listing'}
+              aria-pressed={isFavorite}
+              title={isFavorite ? 'Remove from saved' : 'Save for later'}
+            >
+              {isFavorite ? '♥' : '♡'}
+            </button>
+          )}
+          {item.is_sold && <span className="sold-overlay">SOLD</span>}
           {images.length > 1 && (
             <>
               <button
@@ -946,7 +1696,7 @@ const ListingCard = ({
                 transition: 'color 0.2s ease',
               }}
               onClick={() =>
-                onViewSellerListings(item.seller_id, item.seller_name)
+                onViewSeller(item.seller_id)
               }
               onMouseEnter={(e) =>
                 (e.target.style.color = THEME.emerald)
@@ -954,10 +1704,19 @@ const ListingCard = ({
               onMouseLeave={(e) =>
                 (e.target.style.color = '#E2E8F0')
               }
-              title="Click to see all listings by this seller"
+              title="View seller profile and reviews"
             >
               {item.seller_name || 'UNILUS Student'}
             </strong>
+            {item.seller_review_count !== undefined && (
+              <span style={{ marginLeft: '8px' }}>
+                <RatingLine
+                  rating={item.seller_rating}
+                  count={item.seller_review_count}
+                  size={12}
+                />
+              </span>
+            )}
           </p>
 
           <p
@@ -976,28 +1735,40 @@ const ListingCard = ({
       <div style={{ padding: '0 15px 15px 15px' }}>
         <button
           onClick={handleChatClick}
-          disabled={!currentUser}
+                    disabled={!canChat}
+
           style={{
             width: '100%',
             padding: '10px',
             backgroundColor: 'transparent',
-            color: currentUser ? THEME.goldAccent : THEME.textMuted,
+            color: canChat ? THEME.goldAccent : THEME.textMuted,
             border: `1px solid ${
-              currentUser ? THEME.goldAccent : '#475569'
+              canChat ? THEME.goldAccent : '#475569'
             }`,
             borderRadius: '6px',
             fontWeight: 'bold',
-            cursor: currentUser ? 'pointer' : 'not-allowed',
+            cursor: canChat ? 'pointer' : 'not-allowed',
             transition: 'all 0.2s ease',
           }}
           title={
             !currentUser
               ? 'Please login to chat'
+              : isOwn
+              ? 'This is your listing'
               : 'Ask seller about this item'
           }
         >
-          💬 Ask Seller
+                    {isOwn ? 'Your listing' : item.is_sold ? 'Sold' : '💬 Ask Seller'}
         </button>
+        {currentUser && !isOwn && onReport && (
+          <button
+            type="button"
+            className="report-link"
+            onClick={() => onReport(item)}
+          >
+            ⚑ Report this listing
+          </button>
+        )}
       </div>
     </div>
   );
@@ -1435,6 +2206,515 @@ const Highlight = ({ text, terms }) => {
   );
 };
 
+// ============ ADMIN: REPORTS QUEUE ============
+const AdminReports = ({ showToast, onRemoveListing, onChanged, refreshKey }) => {
+  const [status, setStatus] = useState('open');
+  const [reports, setReports] = useState([]);
+  const [pagination, setPagination] = useState({ total: 0, total_pages: 1 });
+  const [page, setPage] = useState(1);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [busyId, setBusyId] = useState(null);
+
+  const load = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError('');
+
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/admin/reports?status=${status}&page=${page}&limit=15`,
+        { headers: { ...getAuthHeaders() } }
+      );
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        setReports(data.reports);
+        setPagination(data.pagination);
+      } else {
+        setLoadError(data.error || 'Could not load reports.');
+      }
+    } catch (err) {
+      setLoadError('Connection error. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [status, page]);
+
+  useEffect(() => {
+    load();
+  }, [load, refreshKey]);
+
+  const handle = async (report, action) => {
+    setBusyId(report.id);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/reports/${report.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        showToast(action === 'dismiss' ? 'Report dismissed.' : 'Report resolved.', 'success');
+        await load();
+        onChanged();
+      } else {
+        showToast(data.error || 'Could not update the report.', 'error');
+        load();
+      }
+    } catch (err) {
+      showToast('Connection error.', 'error');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <>
+      <div className="adm-pills">
+        {[
+          ['open', 'Open'],
+          ['resolved', 'Resolved'],
+          ['dismissed', 'Dismissed'],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            className={`adm-pill ${status === key ? 'active' : ''}`}
+            onClick={() => {
+              setStatus(key);
+              setPage(1);
+            }}
+          >
+            {label}
+          </button>
+        ))}
+        <span className="adm-result-count">
+          {pagination.total} report{pagination.total === 1 ? '' : 's'}
+        </span>
+      </div>
+
+      {loadError ? (
+        <div className="adm-empty">
+          <p>{loadError}</p>
+          <button className="adm-btn adm-btn-ghost" onClick={load}>
+            Try again
+          </button>
+        </div>
+      ) : isLoading && reports.length === 0 ? (
+        <div className="adm-empty">
+          <p>Loading reports...</p>
+        </div>
+      ) : reports.length === 0 ? (
+        <div className="adm-empty">
+          <span className="adm-empty-icon">{status === 'open' ? '✅' : '📋'}</span>
+          <p>{status === 'open' ? 'No open reports. Nice work.' : 'Nothing here yet.'}</p>
+        </div>
+      ) : (
+        <div className={`adm-list ${isLoading ? 'is-loading' : ''}`}>
+          {reports.map((r) => {
+            const imgs = parseImages(r.image_url);
+
+            return (
+              <div key={r.id} className={`adm-row ${r.status === 'open' ? 'flagged' : ''}`}>
+                <div className="adm-row-main">
+                  <div className="adm-thumb">
+                    {imgs[0] ? <img src={thumb(imgs[0], 200)} alt="" loading="lazy" /> : <span>No photo</span>}
+                  </div>
+                  <div className="adm-info">
+                    <div className="adm-info-top">
+                      <h3 className="adm-item-title">{r.title}</h3>
+                      <div className="adm-badges">
+                        <span className="adm-badge adm-badge-flag">{r.reason}</span>
+                        {r.open_reports_for_listing > 1 && r.status === 'open' && (
+                          <span className="adm-badge adm-badge-repeat">
+                            {r.open_reports_for_listing} reports on this listing
+                          </span>
+                        )}
+                        {r.removed_at && <span className="adm-badge adm-badge-sold">Removed</span>}
+                        {r.seller_banned && <span className="adm-badge adm-badge-sold">Seller suspended</span>}
+                      </div>
+                    </div>
+                    <p className="adm-meta">
+                      ZMW {r.price} · {r.category || 'Other'} · Reported {formatDate(r.created_at)} by{' '}
+                      {r.reporter_name || 'a student'}
+                    </p>
+                    <p className="adm-seller">
+                      Seller: <strong>{r.seller_name || 'Unknown'}</strong>
+                      {r.seller_email && <span className="adm-seller-detail">{r.seller_email}</span>}
+                      {r.seller_prior_removals > 0 && (
+                        <span className="adm-badge adm-badge-repeat">
+                          {r.seller_prior_removals} earlier removal{r.seller_prior_removals === 1 ? '' : 's'}
+                        </span>
+                      )}
+                    </p>
+                    {r.details && <p className="adm-log-note">“{r.details}”</p>}
+                    {r.status !== 'open' && r.resolution_note && (
+                      <p className="adm-log-note">Note: {r.resolution_note}</p>
+                    )}
+                  </div>
+                  {r.status === 'open' && (
+                    <div className="adm-actions">
+                      {!r.removed_at && (
+                        <button
+                          className="adm-btn adm-btn-danger"
+                          onClick={() =>
+                            onRemoveListing({
+                              id: r.listing_id,
+                              title: r.title,
+                              seller_name: r.seller_name,
+                            })
+                          }
+                        >
+                          Remove listing
+                        </button>
+                      )}
+                      <button
+                        className="adm-btn adm-btn-ghost"
+                        disabled={busyId === r.id}
+                        onClick={() => handle(r, 'dismiss')}
+                      >
+                        Dismiss
+                      </button>
+                      {r.removed_at && (
+                        <button
+                          className="adm-btn adm-btn-ghost"
+                          disabled={busyId === r.id}
+                          onClick={() => handle(r, 'resolve')}
+                        >
+                          Mark resolved
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {pagination.total_pages > 1 && (
+        <div className="adm-pager">
+          <button className="adm-btn adm-btn-ghost" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+            Previous
+          </button>
+          <span>
+            Page {page} of {pagination.total_pages}
+          </span>
+          <button
+            className="adm-btn adm-btn-ghost"
+            disabled={page >= pagination.total_pages}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            Next
+          </button>
+        </div>
+      )}
+    </>
+  );
+};
+
+// ============ ADMIN: USERS ============
+const BAN_REASONS = [
+  'Repeated rule violations',
+  'Scam or fraud',
+  'Harassment',
+  'Spam',
+  'Other',
+];
+
+const AdminUsers = ({ showToast, onChanged }) => {
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState('all');
+  const [page, setPage] = useState(1);
+  const [users, setUsers] = useState([]);
+  const [pagination, setPagination] = useState({ total: 0, total_pages: 1 });
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [banTarget, setBanTarget] = useState(null);
+  const [banReason, setBanReason] = useState('');
+  const [banNote, setBanNote] = useState('');
+  const [isBusy, setIsBusy] = useState(false);
+  const [modalError, setModalError] = useState('');
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearch(searchInput.trim());
+      setPage(1);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  const load = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError('');
+
+    try {
+      const params = new URLSearchParams({ page, limit: 15 });
+      if (search) params.set('search', search);
+      if (filter !== 'all') params.set('status', filter);
+
+      const res = await fetch(`${API_BASE}/api/admin/users?${params}`, {
+        headers: { ...getAuthHeaders() },
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        setUsers(data.users);
+        setPagination(data.pagination);
+      } else {
+        setLoadError(data.error || 'Could not load users.');
+      }
+    } catch (err) {
+      setLoadError('Connection error. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [page, search, filter]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const confirmBan = async () => {
+    if (!banTarget || !banReason) return;
+    setIsBusy(true);
+    setModalError('');
+
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/users/${banTarget.id}/ban`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ reason: banReason, note: banNote }),
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        showToast(`${banTarget.full_name} was suspended.`, 'success');
+        setBanTarget(null);
+        await load();
+        onChanged();
+      } else {
+        setModalError(data.error || 'Could not suspend this account.');
+      }
+    } catch (err) {
+      setModalError('Connection error. Please try again.');
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const unban = async (user) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/users/${user.id}/unban`, {
+        method: 'PUT',
+        headers: { ...getAuthHeaders() },
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        showToast(`${user.full_name} was reinstated.`, 'success');
+        await load();
+        onChanged();
+      } else {
+        showToast(data.error || 'Could not reinstate this account.', 'error');
+      }
+    } catch (err) {
+      showToast('Connection error.', 'error');
+    }
+  };
+
+  return (
+    <>
+      <div className="adm-toolbar">
+        <input
+          type="text"
+          className="search-input"
+          placeholder="Search by name, email or student ID..."
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+        />
+      </div>
+
+      <div className="adm-pills">
+        {[
+          ['all', 'Everyone'],
+          ['banned', 'Suspended'],
+          ['admins', 'Admins'],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            className={`adm-pill ${filter === key ? 'active' : ''}`}
+            onClick={() => {
+              setFilter(key);
+              setPage(1);
+            }}
+          >
+            {label}
+          </button>
+        ))}
+        <span className="adm-result-count">
+          {pagination.total} user{pagination.total === 1 ? '' : 's'}
+        </span>
+      </div>
+
+      {loadError ? (
+        <div className="adm-empty">
+          <p>{loadError}</p>
+          <button className="adm-btn adm-btn-ghost" onClick={load}>
+            Try again
+          </button>
+        </div>
+      ) : isLoading && users.length === 0 ? (
+        <div className="adm-empty">
+          <p>Loading users...</p>
+        </div>
+      ) : users.length === 0 ? (
+        <div className="adm-empty">
+          <span className="adm-empty-icon">🔍</span>
+          <p>No users match.</p>
+        </div>
+      ) : (
+        <div className={`adm-list ${isLoading ? 'is-loading' : ''}`}>
+          {users.map((u) => (
+            <div key={u.id} className={`adm-row ${u.is_banned ? 'flagged' : ''}`}>
+              <div className="adm-row-main">
+                <div className="adm-info">
+                  <div className="adm-info-top">
+                    <h3 className="adm-item-title">{u.full_name}</h3>
+                    <div className="adm-badges">
+                      {u.role === 'admin' && <span className="adm-badge adm-badge-sold">Admin</span>}
+                      {u.is_banned && <span className="adm-badge adm-badge-flag">Suspended</span>}
+                      {!u.email_verified && <span className="adm-badge adm-badge-repeat">Unverified</span>}
+                      {u.removals > 0 && (
+                        <span className="adm-badge adm-badge-repeat">
+                          {u.removals} removal{u.removals === 1 ? '' : 's'}
+                        </span>
+                      )}
+                      {u.reports_received > 0 && (
+                        <span className="adm-badge adm-badge-repeat">
+                          {u.reports_received} report{u.reports_received === 1 ? '' : 's'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <p className="adm-meta">
+                    {u.email}
+                    {u.student_id ? ` · ID ${u.student_id}` : ''} · Joined {formatDate(u.created_at)} ·{' '}
+                    {u.active_listings} active listing{u.active_listings === 1 ? '' : 's'}
+                  </p>
+                  {u.is_banned && u.ban_reason && <p className="adm-log-note">Suspended: {u.ban_reason}</p>}
+                </div>
+                <div className="adm-actions">
+                  {u.is_banned ? (
+                    <button className="adm-btn adm-btn-ghost" onClick={() => unban(u)}>
+                      Reinstate
+                    </button>
+                  ) : (
+                    u.role !== 'admin' && (
+                      <button
+                        className="adm-btn adm-btn-danger"
+                        onClick={() => {
+                          setBanTarget(u);
+                          setBanReason('');
+                          setBanNote('');
+                          setModalError('');
+                        }}
+                      >
+                        Suspend
+                      </button>
+                    )
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {pagination.total_pages > 1 && (
+        <div className="adm-pager">
+          <button className="adm-btn adm-btn-ghost" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+            Previous
+          </button>
+          <span>
+            Page {page} of {pagination.total_pages}
+          </span>
+          <button
+            className="adm-btn adm-btn-ghost"
+            disabled={page >= pagination.total_pages}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            Next
+          </button>
+        </div>
+      )}
+
+      {banTarget && (
+        <div className="modal-overlay" onClick={isBusy ? undefined : () => setBanTarget(null)}>
+          <div className="modal-content adm-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setBanTarget(null)} aria-label="Close">
+              ×
+            </button>
+            <h3 className="adm-modal-title">Suspend {banTarget.full_name}?</h3>
+            <p className="adm-modal-sub">
+              They will be signed out immediately and cannot sign in. Their listings are hidden from the
+              marketplace until you reinstate them.
+            </p>
+            {modalError && (
+              <div className="auth-error" role="alert">
+                {modalError}
+              </div>
+            )}
+            <p className="adm-modal-label">Reason</p>
+            <div className="adm-reasons">
+              {BAN_REASONS.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  className={`adm-reason ${banReason === r ? 'active' : ''}`}
+                  onClick={() => setBanReason(r)}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+            <label className="adm-modal-label" htmlFor="ban-note">
+              Internal note (optional)
+            </label>
+            <textarea
+              id="ban-note"
+              className="form-textarea"
+              rows="2"
+              maxLength={500}
+              value={banNote}
+              onChange={(e) => setBanNote(e.target.value)}
+            />
+            <div className="adm-modal-actions">
+              <button className="adm-btn adm-btn-ghost" onClick={() => setBanTarget(null)} disabled={isBusy}>
+                Cancel
+              </button>
+              <button className="adm-btn adm-btn-danger solid" onClick={confirmBan} disabled={!banReason || isBusy}>
+                {isBusy ? 'Suspending...' : 'Suspend account'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
+const LOG_ACTION_LABELS = {
+  remove: 'Listing removed',
+  restore: 'Listing restored',
+  ban: 'Account suspended',
+  unban: 'Account reinstated',
+  review_remove: 'Review removed',
+};
+
 const AdminPanel = ({ showToast, onListingsChanged }) => {
   const [view, setView] = useState('listings');
 
@@ -1469,7 +2749,8 @@ const AdminPanel = ({ showToast, onListingsChanged }) => {
     total: 0,
     total_pages: 1,
   });
-  const [isLogLoading, setIsLogLoading] = useState(false);
+    const [isLogLoading, setIsLogLoading] = useState(false);
+  const [reportsKey, setReportsKey] = useState(0);
 
   // Wait for the admin to stop typing before searching.
   useEffect(() => {
@@ -1614,9 +2895,9 @@ const AdminPanel = ({ showToast, onListingsChanged }) => {
           'success'
         );
 
-        setRemoveTarget(null);
+                setRemoveTarget(null);
         setExpandedId(null);
-
+        setReportsKey((k) => k + 1);
         await Promise.all([
           fetchListings(),
           fetchStats(),
@@ -1640,11 +2921,41 @@ const AdminPanel = ({ showToast, onListingsChanged }) => {
     }
   };
 
+    const restoreListing = async (item) => {
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/admin/listings/${item.id}/restore`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders(),
+          },
+          body: JSON.stringify({}),
+        }
+      );
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        showToast('Listing restored and the seller was notified.', 'success');
+        setExpandedId(null);
+        await Promise.all([fetchListings(), fetchStats(), onListingsChanged()]);
+      } else {
+        showToast(data.error || 'Failed to restore listing.', 'error');
+      }
+    } catch (err) {
+      console.error('Failed to restore listing:', err);
+      showToast('Failed to restore listing. Check your connection.', 'error');
+    }
+  };
+
   const STATUS_FILTERS = [
     { key: 'all', label: 'All listings' },
+    { key: 'reported', label: 'Reported', count: stats?.open_reports },
     { key: 'flagged', label: 'Flagged', count: stats?.flagged_listings },
     { key: 'active', label: 'Active' },
     { key: 'sold', label: 'Sold' },
+    { key: 'removed', label: 'Removed', count: stats?.removed_listings },
   ];
 
   const hasFilters =
@@ -1656,12 +2967,20 @@ const AdminPanel = ({ showToast, onListingsChanged }) => {
         <div>
           <h2 className="adm-title">Moderation</h2>
           <p className="adm-sub">
-            Review listings and remove anything that breaks the marketplace
-            rules.
+                        Handle reports, review listings, and manage accounts.
           </p>
         </div>
 
         <div className="adm-views">
+          <button
+            className={`adm-view-btn ${view === 'reports' ? 'active' : ''}`}
+            onClick={() => setView('reports')}
+          >
+            Reports
+            {stats?.open_reports > 0 && (
+              <span className="adm-pill-count">{stats.open_reports}</span>
+            )}
+          </button>
           <button
             className={`adm-view-btn ${view === 'listings' ? 'active' : ''}`}
             onClick={() => setView('listings')}
@@ -1669,10 +2988,16 @@ const AdminPanel = ({ showToast, onListingsChanged }) => {
             Listings
           </button>
           <button
+            className={`adm-view-btn ${view === 'users' ? 'active' : ''}`}
+            onClick={() => setView('users')}
+          >
+            Users
+          </button>
+          <button
             className={`adm-view-btn ${view === 'log' ? 'active' : ''}`}
             onClick={() => setView('log')}
           >
-            Removal history
+            History
           </button>
         </div>
       </div>
@@ -1692,6 +3017,15 @@ const AdminPanel = ({ showToast, onListingsChanged }) => {
             <span className="adm-stat-label">Need review</span>
           </button>
 
+                    <button
+            className={`adm-stat adm-stat-flag ${
+              stats.open_reports > 0 ? 'has-flags' : ''
+            }`}
+            onClick={() => setView('reports')}
+          >
+            <span className="adm-stat-num">{stats.open_reports}</span>
+            <span className="adm-stat-label">Open reports</span>
+          </button>
           <div className="adm-stat">
             <span className="adm-stat-num">{stats.active_listings}</span>
             <span className="adm-stat-label">Active listings</span>
@@ -1704,8 +3038,15 @@ const AdminPanel = ({ showToast, onListingsChanged }) => {
 
           <div className="adm-stat">
             <span className="adm-stat-num">{stats.total_users}</span>
-            <span className="adm-stat-label">Students</span>
+                        <span className="adm-stat-label">Students</span>
           </div>
+          <button
+            className="adm-stat"
+            onClick={() => setView('users')}
+          >
+            <span className="adm-stat-num">{stats.banned_users}</span>
+            <span className="adm-stat-label">Suspended</span>
+          </button>
         </div>
       )}
 
@@ -1816,8 +3157,9 @@ const AdminPanel = ({ showToast, onListingsChanged }) => {
                       <div className="adm-thumb">
                         {images[0] ? (
                           <img
-                            src={images[0]}
+                                                        src={thumb(images[0], 200)}
                             alt=""
+                            loading="lazy"
                             onError={(e) => {
                               e.target.style.display = 'none';
                             }}
@@ -1842,9 +3184,20 @@ const AdminPanel = ({ showToast, onListingsChanged }) => {
                                 Flagged
                               </span>
                             )}
-                            {item.is_sold && (
+                                                        {item.is_sold && (
                               <span className="adm-badge adm-badge-sold">
                                 Sold
+                              </span>
+                            )}
+                            {item.removed_at && (
+                              <span className="adm-badge adm-badge-sold">
+                                Removed
+                              </span>
+                            )}
+                            {item.open_reports > 0 && (
+                              <span className="adm-badge adm-badge-flag">
+                                {item.open_reports} report
+                                {item.open_reports === 1 ? '' : 's'}
                               </span>
                             )}
                             {item.seller_prior_removals > 0 && (
@@ -1893,17 +3246,38 @@ const AdminPanel = ({ showToast, onListingsChanged }) => {
                           {isOpen ? 'Hide details' : 'View details'}
                         </button>
 
-                        <button
-                          className="adm-btn adm-btn-danger"
-                          onClick={() => openRemove(item)}
-                        >
-                          Remove
-                        </button>
+                        {item.removed_at ? (
+                          <button
+                            className="adm-btn adm-btn-primary"
+                            onClick={() => restoreListing(item)}
+                          >
+                            Restore
+                          </button>
+                        ) : (
+                          <button
+                            className="adm-btn adm-btn-danger"
+                            onClick={() => openRemove(item)}
+                          >
+                            Remove
+                          </button>
+                        )}
                       </div>
                     </div>
 
                     {isOpen && (
                       <div className="adm-details">
+                                                {item.removed_at && (
+                          <div className="adm-detail-block">
+                            <h4>Removed</h4>
+                            <p className="adm-desc">
+                              {item.removed_reason}
+                              {item.removed_note ? ` — ${item.removed_note}` : ''}
+                              {' · '}
+                              {formatDate(item.removed_at)}. Permanently
+                              deleted 30 days after removal unless restored.
+                            </p>
+                          </div>
+                        )}
                         <div className="adm-detail-block">
                           <h4>Description</h4>
                           <p className="adm-desc">
@@ -1990,10 +3364,9 @@ const AdminPanel = ({ showToast, onListingsChanged }) => {
           ) : logEntries.length === 0 ? (
             <div className="adm-empty">
               <span className="adm-empty-icon">📋</span>
-              <p>No listings have been removed yet.</p>
+              <p>No moderation actions yet.</p>
               <p className="adm-empty-sub">
-                Every removal will be recorded here with the reason and who
-                made it.
+                Removals, restores, suspensions and review removals are recorded here with the reason and who did it.
               </p>
             </div>
           ) : (
@@ -2001,12 +3374,12 @@ const AdminPanel = ({ showToast, onListingsChanged }) => {
               {logEntries.map((entry) => (
                 <div key={entry.id} className="adm-log-row">
                   <div className="adm-log-main">
-                    <strong>{entry.listing_title || 'Deleted listing'}</strong>
+                    <strong>{entry.listing_title || entry.seller_name || 'Deleted listing'}</strong>
                     <span className="adm-log-reason">{entry.reason}</span>
                   </div>
 
                   <p className="adm-meta">
-                    Seller: {entry.seller_name || 'Unknown'} · Removed by{' '}
+                    {LOG_ACTION_LABELS[entry.action] || 'Removed'} · Account: {entry.seller_name || 'Unknown'} · By{' '}
                     {entry.admin_name || 'an admin'} ·{' '}
                     {new Date(entry.created_at).toLocaleString([], {
                       day: 'numeric',
@@ -2014,9 +3387,10 @@ const AdminPanel = ({ showToast, onListingsChanged }) => {
                       hour: '2-digit',
                       minute: '2-digit',
                     })}
-                    {entry.seller_notified
-                      ? ' · Seller notified'
-                      : ' · Seller not notified'}
+                    {['remove', 'restore'].includes(entry.action) &&
+                      (entry.seller_notified
+                        ? ' · Seller notified'
+                        : ' · Seller not notified')}
                   </p>
 
                   {entry.note && (
@@ -2051,6 +3425,22 @@ const AdminPanel = ({ showToast, onListingsChanged }) => {
         </>
       )}
 
+            {view === 'reports' && (
+        <AdminReports
+          showToast={showToast}
+          refreshKey={reportsKey}
+          onRemoveListing={openRemove}
+          onChanged={() => {
+            fetchStats();
+            fetchListings();
+          }}
+        />
+      )}
+
+      {view === 'users' && (
+        <AdminUsers showToast={showToast} onChanged={fetchStats} />
+      )}
+
       {removeTarget && (
         <div className="modal-overlay" onClick={closeRemove}>
           <div
@@ -2064,8 +3454,9 @@ const AdminPanel = ({ showToast, onListingsChanged }) => {
             <h3 className="adm-modal-title">Remove this listing?</h3>
             <p className="adm-modal-sub">
               <strong>{removeTarget.title}</strong> by{' '}
-              {removeTarget.seller_name || 'Unknown'} will be deleted
-              permanently, along with its photos.
+              {removeTarget.seller_name || 'Unknown'} will be hidden from
+              the marketplace. You can restore it for 30 days; after that it is
+              deleted permanently with its photos.
             </p>
 
             <p className="adm-modal-label">Why is it being removed?</p>
@@ -2157,11 +3548,27 @@ function App() {
     listingTitle: '',
   });
 
-  const [lastMessageCount, setLastMessageCount] = useState(0);
+  const [unreadTotal, setUnreadTotal] = useState(0);
+  const chatListeners = useRef(new Set());
+  const chatModalRef = useRef(null);
+  const [profileSellerId, setProfileSellerId] = useState(null);
+  const [reportTarget, setReportTarget] = useState(null);
+  const [favoriteIds, setFavoriteIds] = useState(() => new Set());
+  const [savedListings, setSavedListings] = useState([]);
+  const [isSavedLoading, setIsSavedLoading] = useState(false);
+  const savedMutations = useRef(0);
 
-  // FEATURE 3 - Seller Filter State
-  const [sellerFilter, setSellerFilter] = useState(null);
-  const [sellerName, setSellerName] = useState('');
+  // Marketplace browsing: search, filters, sorting and paging happen on the server
+  const [sortBy, setSortBy] = useState('newest');
+  const [minPrice, setMinPrice] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
+  const [applied, setApplied] = useState({ search: '', min: '', max: '' });
+  const [listingMeta, setListingMeta] = useState({ page: 1, total: 0, hasMore: false });
+  const [isListingsLoading, setIsListingsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [listingsError, setListingsError] = useState('');
+  const listingsRequest = useRef(0);
+  const sentinelRef = useRef(null);
 
   const { toast, showToast } = useToast();
 
@@ -2198,6 +3605,7 @@ function App() {
   }, []);
 
   const isAdmin = currentUser?.role === 'admin';
+  const currentUserId = currentUser?.id || currentUser?.user?.id || null;
 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -2225,27 +3633,162 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
 
   // ==================== FETCH PUBLIC LISTINGS ====================
+  const buildListingParams = useCallback(
+    (page) => {
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: '12',
+        sort: sortBy,
+      });
+
+      if (applied.search) params.set('search', applied.search);
+      if (selectedCategory !== 'All') params.set('category', selectedCategory);
+      if (selectedCampus !== 'All') params.set('campus', selectedCampus);
+      if (applied.min !== '') params.set('min_price', applied.min);
+      if (applied.max !== '') params.set('max_price', applied.max);
+
+      return params.toString();
+    },
+    [applied, selectedCategory, selectedCampus, sortBy]
+  );
+
+  // Loads page 1 (also used to refresh after any listing change)
   const fetchListings = useCallback(async () => {
+    const requestId = ++listingsRequest.current;
+    setIsListingsLoading(true);
+    setListingsError('');
+
     try {
-      const res = await fetch(`${API_BASE}/api/listings`);
+      const res = await fetch(`${API_BASE}/api/listings?${buildListingParams(1)}`);
       const data = await res.json();
 
-      if (data.success) {
+      if (requestId !== listingsRequest.current) return;
+
+      if (res.ok && data.success) {
         setListings(data.data);
+        setListingMeta({
+          page: 1,
+          total: data.pagination.total,
+          hasMore: data.pagination.has_more,
+        });
+      } else {
+        setListingsError(data.error || 'Could not load listings.');
       }
     } catch (err) {
       console.error('Failed to fetch listings:', err);
-
-      showToast(
-        'Failed to connect to server. Check your connection.',
-        'error'
-      );
+      if (requestId === listingsRequest.current) {
+        setListingsError('Failed to connect to server. Check your connection.');
+      }
+    } finally {
+      if (requestId === listingsRequest.current) setIsListingsLoading(false);
     }
-  }, [showToast]);
+  }, [buildListingParams]);
+
+  const loadMoreListings = useCallback(async () => {
+    if (isLoadingMore || isListingsLoading || !listingMeta.hasMore) return;
+
+    const requestId = listingsRequest.current; // a filter change makes this stale
+    const nextPage = listingMeta.page + 1;
+    setIsLoadingMore(true);
+
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/listings?${buildListingParams(nextPage)}`
+      );
+      const data = await res.json();
+
+      if (requestId !== listingsRequest.current) return;
+
+      if (res.ok && data.success) {
+        setListings((prev) => {
+          const seen = new Set(prev.map((item) => item.id));
+          return [...prev, ...data.data.filter((item) => !seen.has(item.id))];
+        });
+        setListingMeta({
+          page: nextPage,
+          total: data.pagination.total,
+          hasMore: data.pagination.has_more,
+        });
+      } else {
+        showToast(data.error || 'Could not load more listings.', 'error');
+      }
+    } catch (err) {
+      showToast('Could not load more listings. Check your connection.', 'error');
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [
+    isLoadingMore,
+    isListingsLoading,
+    listingMeta,
+    buildListingParams,
+    showToast,
+  ]);
+
+  // Wait for the user to stop typing before searching
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setApplied((prev) => {
+        const next = {
+          search: searchTerm.trim(),
+          min: minPrice.trim(),
+          max: maxPrice.trim(),
+        };
+        return prev.search === next.search &&
+          prev.min === next.min &&
+          prev.max === next.max
+          ? prev
+          : next;
+      });
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [searchTerm, minPrice, maxPrice]);
+
+  // Infinite scroll: load the next page when the bottom comes into view
+  useEffect(() => {
+    const el = sentinelRef.current;
+
+    if (
+      !el ||
+      activeTab !== 'browse' ||
+      !listingMeta.hasMore ||
+      typeof IntersectionObserver === 'undefined'
+    ) {
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) loadMoreListings();
+      },
+      { rootMargin: '400px' }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [activeTab, listingMeta.hasMore, listings.length, loadMoreListings]);
+
+  const hasActiveFilters =
+    searchTerm !== '' ||
+    selectedCategory !== 'All' ||
+    selectedCampus !== 'All' ||
+    minPrice !== '' ||
+    maxPrice !== '' ||
+    sortBy !== 'newest';
+
+  const clearFilters = () => {
+    setSearchTerm('');
+    setSelectedCategory('All');
+    setSelectedCampus('All');
+    setMinPrice('');
+    setMaxPrice('');
+    setSortBy('newest');
+  };
 
   // ==================== FETCH SELLER LISTINGS ====================
   const fetchSellerListings = useCallback(async () => {
-    const userId = currentUser?.id || currentUser?.user?.id;
+    const userId = currentUserId;
     if (!userId) return;
 
     try {
@@ -2271,106 +3814,22 @@ function App() {
     } catch (err) {
       console.error('Failed to load seller listings:', err);
     }
-  }, [currentUser, showToast]);
+  }, [currentUserId, showToast]);
 
   useEffect(() => {
     fetchListings();
   }, [fetchListings]);
 
-  // Refresh the account (including admin role) for sessions saved
-  // before roles existed, or after a role change.
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-
-    const refreshAccount = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/auth/me`, {
-          headers: { ...getAuthHeaders() },
-        });
-        const data = await res.json();
-
-        if (res.ok && data.success) {
-          localStorage.setItem('user', JSON.stringify(data.user));
-          setCurrentUser((prev) =>
-            prev ? { ...prev, ...data.user } : prev
-          );
-        }
-      } catch (err) {
-        console.error('Failed to refresh account:', err);
-      }
-    };
-
-    refreshAccount();
-  }, []);
 
   useEffect(() => {
-    if (currentUser) {
+    if (currentUserId) {
       fetchSellerListings();
     } else {
       setSellerListings([]);
     }
-  }, [currentUser, fetchSellerListings]);
+  }, [currentUserId, fetchSellerListings]);
 
-  // ==================== CHAT NOTIFICATIONS ====================
-  useEffect(() => {
-    if (!currentUser) return;
-
-    const checkNotifications = async () => {
-      const userId = currentUser?.id || currentUser?.user?.id;
-
-      try {
-        const res = await fetch(
-          `${API_BASE}/api/chat/unread/total/${userId}`,
-          {
-            headers: {
-              ...getAuthHeaders(),
-            },
-          }
-        );
-
-        const data = await res.json();
-
-        if (
-          data.success &&
-          data.total_unread > lastMessageCount
-        ) {
-          playNotificationSound();
-
-          if (
-            'Notification' in window &&
-            Notification.permission === 'granted'
-          ) {
-            new Notification('📩 New Message on UniLnk', {
-              body: `You have ${data.total_unread} unread message(s)`,
-              icon: '/favicon.ico',
-            });
-          }
-
-          showToast(
-            `📩 You have ${data.total_unread} new message(s)`,
-            'info'
-          );
-        }
-
-        setLastMessageCount(data.total_unread || 0);
-      } catch (err) {
-        console.error('Failed to check notifications:', err);
-      }
-    };
-
-    if (
-      'Notification' in window &&
-      Notification.permission === 'default'
-    ) {
-      Notification.requestPermission();
-    }
-
-    checkNotifications();
-
-    const interval = setInterval(checkNotifications, 10000);
-    return () => clearInterval(interval);
-  }, [currentUser, lastMessageCount, showToast]);
+  // Chat notifications now arrive through the live stream (see useChatStream below)
 
   const playNotificationSound = () => {
     try {
@@ -2410,11 +3869,19 @@ function App() {
     localStorage.removeItem('token');
     localStorage.removeItem(ACTIVITY_KEY);
 
-    setCurrentUser(null);
+        setCurrentUser(null);
     setSellerListings([]);
     setEditingId(null);
     setActiveTab('browse');
-
+    setFavoriteIds(new Set());
+    setProfileSellerId(null);
+    setChatModal({
+      isOpen: false,
+      sellerId: null,
+      listingId: null,
+      listingTitle: '',
+      sellerName: '',
+    });
     showToast('Logged out successfully', 'info');
   };
 
@@ -2456,10 +3923,254 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const { secondsLeft: idleSecondsLeft, stayActive } = useIdleLogout({
+    const { secondsLeft: idleSecondsLeft, stayActive } = useIdleLogout({
     enabled: !!currentUser,
     onTimeout: handleIdleTimeout,
   });
+
+  // Ends the session when the server says it is no longer valid
+  const forceLogout = useCallback(
+    (message) => {
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
+      localStorage.removeItem(ACTIVITY_KEY);
+      setCurrentUser(null);
+      setSellerListings([]);
+      setEditingId(null);
+      setActiveTab('browse');
+      setFavoriteIds(new Set());
+      setProfileSellerId(null);
+      setChatModal({
+        isOpen: false,
+        sellerId: null,
+        listingId: null,
+        listingTitle: '',
+        sellerName: '',
+      });
+      showToast(message, 'error', 6000);
+    },
+    [showToast]
+  );
+
+  // Refresh the account (including admin role) for sessions saved
+  // before roles existed, or after a role change.
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    const refreshAccount = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/me`, {
+          headers: { ...getAuthHeaders() },
+        });
+                const data = await res.json();
+
+        if (res.ok && data.success) {
+          localStorage.setItem('user', JSON.stringify(data.user));
+          setCurrentUser((prev) =>
+            prev ? { ...prev, ...data.user } : prev
+          );
+        } else if (data.code === 'ACCOUNT_SUSPENDED') {
+          forceLogout(data.error);
+        } else if (res.status === 401 || res.status === 403) {
+          forceLogout('Your session has expired. Please sign in again.');
+        }
+      } catch (err) {
+        console.error('Failed to refresh account:', err);
+      }
+    };
+
+    refreshAccount();
+  }, []);
+
+  // ==================== LIVE CHAT + UNREAD COUNT ====================
+  const refreshUnread = useCallback(async () => {
+    const userId = currentUserId;
+    if (!userId) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/chat/unread/total/${userId}`, {
+        headers: { ...getAuthHeaders() },
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) setUnreadTotal(data.total_unread || 0);
+    } catch (err) {
+      /* the next refresh will catch up */
+    }
+  }, [currentUserId]);
+
+  useEffect(() => {
+    chatModalRef.current = chatModal;
+  });
+
+  const subscribeChat = useCallback((fn) => {
+    chatListeners.current.add(fn);
+    return () => chatListeners.current.delete(fn);
+  }, []);
+
+  const emitChat = useCallback((event, payload) => {
+    chatListeners.current.forEach((fn) => {
+      try {
+        fn(event, payload);
+      } catch (err) {
+        console.error('Chat listener error:', err);
+      }
+    });
+  }, []);
+
+  const handleChatEvent = useCallback(
+    (event, payload) => {
+      emitChat(event, payload);
+
+      const myId = Number(currentUserId);
+      if (event !== 'message' || Number(payload.receiver_id) !== myId) return;
+
+      const open = chatModalRef.current;
+      if (open?.isOpen && Number(open.sellerId) === Number(payload.sender_id)) {
+        return; // the open chat window marks it as read
+      }
+
+      setUnreadTotal((n) => n + 1);
+      playNotificationSound();
+
+      if (
+        document.visibilityState === 'hidden' &&
+        'Notification' in window &&
+        Notification.permission === 'granted'
+      ) {
+        new Notification('📩 New message on UniLnk', {
+          body: `${payload.sender_name || 'A student'} sent you a message`,
+          icon: '/favicon.ico',
+        });
+      }
+
+      showToast(`📩 New message from ${payload.sender_name || 'a student'}`, 'info');
+    },
+    [currentUserId, emitChat, showToast]
+  );
+
+  useChatStream({
+    enabled: !!currentUser,
+    onEvent: handleChatEvent,
+    onOpen: refreshUnread,
+    onAuthError: (status, body) => {
+      forceLogout(
+        body?.code === 'ACCOUNT_SUSPENDED'
+          ? body.error
+          : 'Your session has expired. Please sign in again.'
+      );
+    },
+  });
+
+  // Safety net: refresh the unread count now and then and when the tab returns
+  useEffect(() => {
+    if (!currentUserId) {
+      setUnreadTotal(0);
+      return undefined;
+    }
+
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+
+    refreshUnread();
+    const interval = setInterval(refreshUnread, 60000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshUnread();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [currentUserId, refreshUnread]);
+
+  // ==================== SAVED LISTINGS (FAVOURITES) ====================
+  useEffect(() => {
+    if (!currentUserId) {
+      setFavoriteIds(new Set());
+      return;
+    }
+
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/favorites/ids`, {
+          headers: { ...getAuthHeaders() },
+        });
+        const data = await res.json();
+        if (res.ok && data.success) setFavoriteIds(new Set(data.ids));
+      } catch (err) {
+        /* hearts simply start empty */
+      }
+    })();
+  }, [currentUserId]);
+
+  const fetchSaved = useCallback(async () => {
+    const mutationsAtStart = savedMutations.current;
+    setIsSavedLoading(true);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/favorites`, {
+        headers: { ...getAuthHeaders() },
+      });
+      const data = await res.json();
+
+      // A save/unsave happened while this was loading: its list is out of date
+      if (mutationsAtStart !== savedMutations.current) return;
+
+      if (res.ok && data.success) setSavedListings(data.data);
+      else showToast(data.error || 'Could not load saved listings.', 'error');
+    } catch (err) {
+      showToast('Could not load saved listings. Check your connection.', 'error');
+    } finally {
+      setIsSavedLoading(false);
+    }
+  }, [showToast]);
+
+  useEffect(() => {
+    if (activeTab === 'saved' && currentUserId) fetchSaved();
+  }, [activeTab, currentUserId, fetchSaved]);
+
+  const toggleFavorite = async (item) => {
+    const wasSaved = favoriteIds.has(item.id);
+    savedMutations.current += 1;
+
+    setFavoriteIds((prev) => {
+      const next = new Set(prev);
+      if (wasSaved) next.delete(item.id);
+      else next.add(item.id);
+      return next;
+    });
+    if (wasSaved) {
+      setSavedListings((prev) => prev.filter((l) => l.id !== item.id));
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/api/favorites/${item.id}`, {
+        method: wasSaved ? 'DELETE' : 'POST',
+        headers: { ...getAuthHeaders() },
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) throw new Error(data.error || 'failed');
+    } catch (err) {
+      // undo the optimistic change
+      setFavoriteIds((prev) => {
+        const next = new Set(prev);
+        if (wasSaved) next.add(item.id);
+        else next.delete(item.id);
+        return next;
+      });
+      showToast(
+        err.message && err.message !== 'failed' && err.message !== 'Failed to fetch'
+          ? err.message
+          : 'Could not update your saved listings.',
+        'error'
+      );
+    }
+  };
 
   // Signed out in another tab -> sign out here too
   useEffect(() => {
@@ -2613,85 +4324,22 @@ function App() {
     }
   };
 
-  // ==================== FILTER PUBLIC LISTINGS ====================
-  const filteredListings = useMemo(() => {
-    return listings.filter((item) => {
-      // Never display sold listings in the public marketplace.
-      if (item.is_sold === true) {
-        return false;
-      }
-
-      const term = searchTerm.toLowerCase();
-
-      const matchesSearch =
-        (item.title || '').toLowerCase().includes(term) ||
-        (item.description || '').toLowerCase().includes(term);
-
-      const matchesCategory =
-        selectedCategory === 'All' ||
-        item.category === selectedCategory;
-
-      const matchesCampus =
-        selectedCampus === 'All' ||
-        item.campus === selectedCampus;
-
-      const matchesSeller = sellerFilter
-        ? String(item.seller_id) === String(sellerFilter)
-        : true;
-
-      return (
-        matchesSearch &&
-        matchesCategory &&
-        matchesCampus &&
-        matchesSeller
-      );
-    });
-  }, [
-    listings,
-    searchTerm,
-    selectedCategory,
-    selectedCampus,
-    sellerFilter,
-  ]);
-
-  // ==================== VIEW SELLER LISTINGS ====================
-  const handleViewSellerListings = (sellerId, sellerName) => {
+  // ==================== SELLER PROFILE ====================
+  const handleViewSeller = (sellerId) => {
     if (!sellerId) {
       showToast('Seller information not available', 'error');
       return;
     }
-
-    setSellerFilter(sellerId);
-    setSellerName(sellerName || 'Seller');
-
-    setSearchTerm('');
-    setSelectedCategory('All');
-    setSelectedCampus('All');
-
-    showToast(
-      `Showing listings by ${sellerName || 'this seller'}`,
-      'info'
-    );
-
-    window.scrollTo({
-      top: 0,
-      behavior: 'smooth',
-    });
-  };
-
-  const clearSellerFilter = () => {
-    setSellerFilter(null);
-    setSellerName('');
-
-    showToast('Showing all listings', 'info');
+    setProfileSellerId(sellerId);
   };
 
   // ==================== OPEN CHAT ====================
-  const handleOpenChat = (
+    const handleOpenChat = (
     sellerId,
     listingId,
     sellerName,
-    requireLogin = false
+    requireLogin = false,
+    listingTitle = ''
   ) => {
     if (requireLogin || !currentUser) {
       setAuthMode('login');
@@ -2710,22 +4358,31 @@ function App() {
       return;
     }
 
-    setChatModal({
+        setChatModal({
       isOpen: true,
       sellerId,
       listingId,
-      listingTitle: sellerName || 'Seller',
+      listingTitle,
+      sellerName: sellerName || 'Seller',
     });
   };
 
-  const handleCloseChat = () => {
+    const handleCloseChat = () => {
     setChatModal({
       isOpen: false,
       sellerId: null,
       listingId: null,
       listingTitle: '',
+      sellerName: '',
     });
+    refreshUnread();
   };
+
+  // Called by the chat window after it marks messages as read
+  const handleChatRead = useCallback(() => {
+    refreshUnread();
+    emitChat('read', {});
+  }, [refreshUnread, emitChat]);
 
   // ==================== CREATE LISTING ====================
   const handleCreateListing = async (e) => {
@@ -2825,15 +4482,30 @@ function App() {
   };
 
   // ==================== NAVIGATION TAB BUTTON ====================
-  const TabButton = ({ tab, label, icon }) => (
+    const TabButton = ({ tab, label, icon, badge = 0 }) => (
     <button
       className={`tab-btn ${activeTab === tab ? 'active' : ''}`}
       onClick={() => setActiveTab(tab)}
     >
       {icon && <span className="tab-icon">{icon}</span>}
       {label}
+      {badge > 0 && (
+        <span className="tab-badge" aria-label={`${badge} unread`}>
+          {badge > 99 ? '99+' : badge}
+        </span>
+      )}
     </button>
   );
+
+  const cardProps = (item) => ({
+    item,
+    currentUser,
+    onOpenChat: handleOpenChat,
+    onViewSeller: handleViewSeller,
+    isFavorite: favoriteIds.has(item.id),
+    onToggleFavorite: toggleFavorite,
+    onReport: setReportTarget,
+  });
 
   // ==================== MAIN UI ====================
   return (
@@ -2923,11 +4595,13 @@ function App() {
 
           {currentUser && (
             <>
-              <TabButton
+                            <TabButton
                 tab="messages"
                 label="Messages"
                 icon="💬"
+                badge={unreadTotal}
               />
+              <TabButton tab="saved" label="Saved" icon="♥" />
 
               <TabButton
                 tab="sell"
@@ -2973,36 +4647,45 @@ function App() {
           isOpen={chatModal.isOpen}
           onClose={handleCloseChat}
           sellerId={chatModal.sellerId}
-          sellerName={chatModal.listingTitle}
+          sellerName={chatModal.sellerName}
           listingId={chatModal.listingId}
           listingTitle={chatModal.listingTitle}
           currentUser={currentUser}
           API_BASE={API_BASE}
+          subscribe={subscribeChat}
+          onRead={handleChatRead}
+          onViewProfile={handleViewSeller}
+        />
+
+        {/* SELLER PROFILE */}
+        <SellerProfileModal
+          sellerId={profileSellerId}
+          onClose={() => setProfileSellerId(null)}
+          currentUser={currentUser}
+          isAdmin={isAdmin}
+          onOpenChat={handleOpenChat}
+          onRequireLogin={() => {
+            setProfileSellerId(null);
+            setAuthMode('login');
+            setIsAuthModalOpen(true);
+          }}
+          showToast={showToast}
+        />
+
+        {/* REPORT A LISTING */}
+        <ReportModal
+          item={reportTarget}
+          onClose={() => setReportTarget(null)}
+          showToast={showToast}
         />
 
         {/* ==================== BROWSE MARKETPLACE ==================== */}
         {activeTab === 'browse' && (
           <div className="tab-content">
-            {sellerFilter && (
-              <div className="seller-filter-banner">
-                <span>
-                  👤 Showing listings by{' '}
-                  <strong>{sellerName || 'Seller'}</strong>
-                </span>
-
-                <button
-                  className="clear-filter-btn"
-                  onClick={clearSellerFilter}
-                >
-                  ✕ Clear Filter
-                </button>
-              </div>
-            )}
-
             <div className="search-filters">
               <input
                 type="text"
-                placeholder="Search items by title or description..."
+                placeholder="Search by title, description or course code..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="search-input"
@@ -3010,9 +4693,7 @@ function App() {
 
               <select
                 value={selectedCategory}
-                onChange={(e) =>
-                  setSelectedCategory(e.target.value)
-                }
+                onChange={(e) => setSelectedCategory(e.target.value)}
                 className="filter-select"
               >
                 {CATEGORIES.map((cat) => (
@@ -3024,13 +4705,10 @@ function App() {
 
               <select
                 value={selectedCampus}
-                onChange={(e) =>
-                  setSelectedCampus(e.target.value)
-                }
+                onChange={(e) => setSelectedCampus(e.target.value)}
                 className="filter-select"
               >
                 <option value="All">All Campuses</option>
-
                 {CAMPUSES.map((camp) => (
                   <option key={camp} value={camp}>
                     {camp}
@@ -3039,34 +4717,121 @@ function App() {
               </select>
             </div>
 
-            <div className="listings-grid">
-              {filteredListings.length === 0 ? (
-                <p className="empty-state">
-                  No listings found matching your criteria.
-                </p>
-              ) : (
-                filteredListings.map((item) => (
-                  <ListingCard
-                    key={item.id}
-                    item={item}
-                    onOpenChat={handleOpenChat}
-                    currentUser={currentUser}
-                    onViewSellerListings={handleViewSellerListings}
-                  />
-                ))
+            <div className="search-filters search-filters-secondary">
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className="filter-select"
+                aria-label="Sort listings"
+              >
+                <option value="newest">Newest first</option>
+                <option value="price_asc">Price: low to high</option>
+                <option value="price_desc">Price: high to low</option>
+              </select>
+
+              <input
+                type="number"
+                min="0"
+                inputMode="numeric"
+                placeholder="Min price (ZMW)"
+                value={minPrice}
+                onChange={(e) => setMinPrice(e.target.value)}
+                className="price-input"
+                aria-label="Minimum price"
+              />
+
+              <input
+                type="number"
+                min="0"
+                inputMode="numeric"
+                placeholder="Max price (ZMW)"
+                value={maxPrice}
+                onChange={(e) => setMaxPrice(e.target.value)}
+                className="price-input"
+                aria-label="Maximum price"
+              />
+
+              {hasActiveFilters && (
+                <button className="clear-filter-btn" onClick={clearFilters}>
+                  ✕ Clear filters
+                </button>
               )}
             </div>
+
+            <p className="results-count" aria-live="polite">
+              {isListingsLoading && listings.length === 0
+                ? 'Loading listings...'
+                : `${listingMeta.total} item${listingMeta.total === 1 ? '' : 's'} found`}
+            </p>
+
+            {listingsError && (
+              <div className="adm-empty">
+                <p>{listingsError}</p>
+                <button className="adm-btn adm-btn-ghost" onClick={fetchListings}>
+                  Try again
+                </button>
+              </div>
+            )}
+
+            <div className="listings-grid">
+              {!listingsError &&
+                !isListingsLoading &&
+                listings.length === 0 && (
+                  <p className="empty-state">
+                    No listings found matching your criteria.
+                  </p>
+                )}
+
+              {listings.map((item) => (
+                <ListingCard key={item.id} {...cardProps(item)} />
+              ))}
+            </div>
+
+            {listingMeta.hasMore && (
+              <div className="load-more" ref={sentinelRef}>
+                <button
+                  className="adm-btn adm-btn-ghost"
+                  onClick={loadMoreListings}
+                  disabled={isLoadingMore}
+                >
+                  {isLoadingMore ? 'Loading...' : 'Load more'}
+                </button>
+              </div>
+            )}
           </div>
         )}
 
         {/* ==================== MESSAGES ==================== */}
         {activeTab === 'messages' && currentUser && (
           <div className="tab-content">
-            <ChatInbox
+                        <ChatInbox
               currentUser={currentUser}
               onOpenChat={handleOpenChat}
               API_BASE={API_BASE}
+              subscribe={subscribeChat}
             />
+          </div>
+        )}
+
+        {/* ==================== SAVED LISTINGS ==================== */}
+        {activeTab === 'saved' && currentUser && (
+          <div className="tab-content">
+            <h2 className="section-title">Saved listings</h2>
+
+            {isSavedLoading && savedListings.length === 0 ? (
+              <p className="empty-state">Loading saved listings...</p>
+            ) : savedListings.length === 0 ? (
+              <p className="empty-state">
+                You have not saved anything yet. Tap the ♡ on a listing to
+                save it for later.
+              </p>
+            ) : (
+              <div className="listings-grid">
+                {savedListings.map((item) => (
+                  <ListingCard key={item.id} {...cardProps(item)} />
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -3243,7 +5008,14 @@ function App() {
         {activeTab === 'dashboard' && currentUser && (
           <div className="tab-content">
             <div className="dashboard-container">
-              <h2 className="section-title">My Dashboard</h2>
+                            <h2 className="section-title">My Dashboard</h2>
+
+              <button
+                className="adm-btn adm-btn-ghost dashboard-profile-btn"
+                onClick={() => setProfileSellerId(currentUser.id || currentUser.user?.id)}
+              >
+                👤 View my public profile
+              </button>
 
               <div className="dashboard-section">
                 <h3 className="dashboard-subtitle">
@@ -3260,6 +5032,8 @@ function App() {
                       const isSold =
                         item.is_sold === true ||
                         item.is_sold === 'true';
+                      const isRemoved = !!item.removed_at;
+                      const showRed = isSold || isRemoved;
 
                       return (
                         <div
@@ -3289,24 +5063,37 @@ function App() {
                                 borderRadius: '12px',
                                 fontSize: '11px',
                                 fontWeight: 'bold',
-                                backgroundColor: isSold
+                                backgroundColor: showRed
                                   ? 'rgba(239, 68, 68, 0.15)'
                                   : 'rgba(16, 185, 129, 0.15)',
-                                color: isSold
+                                color: showRed
                                   ? '#FCA5A5'
                                   : THEME.emerald,
                                 border: `1px solid ${
-                                  isSold
+                                  showRed
                                     ? 'rgba(239, 68, 68, 0.35)'
                                     : 'rgba(16, 185, 129, 0.35)'
                                 }`,
                               }}
                             >
-                              {isSold ? 'SOLD' : 'ACTIVE'}
+                              {isRemoved ? 'REMOVED' : isSold ? 'SOLD' : 'ACTIVE'}
                             </span>
 
-                            {/* Five-day deletion notice */}
-                            {isSold && item.sold_at && (
+                            {isRemoved && (
+                              <span className="removed-note">
+                                Removed by moderators ({item.removed_reason}).
+                                {item.removed_note
+                                  ? ` Note: ${item.removed_note}.`
+                                  : ''}{' '}
+                                It is hidden from the marketplace and will be
+                                deleted permanently after 30 days. If you
+                                think this was a mistake, reply to the
+                                moderators in Messages.
+                              </span>
+                            )}
+
+                            {/* Sold notice */}
+                            {isSold && !isRemoved && item.sold_at && (
                               <span
                                 style={{
                                   display: 'block',
@@ -3316,8 +5103,8 @@ function App() {
                                   lineHeight: '1.5',
                                 }}
                               >
-                                Scheduled for automatic deletion
-                                {' '}5 days after it was marked as sold.
+                                Photos are deleted 5 days after a sale. The
+                                sale stays in your sold history.
                               </span>
                             )}
                           </div>
@@ -3374,7 +5161,7 @@ function App() {
                             ) : (
                               <>
                                 {/* Only active listings can be marked sold or edited. */}
-                                {!isSold && (
+                                {!isSold && !isRemoved && (
                                   <>
                                     <button
                                       onClick={() =>
@@ -3408,14 +5195,14 @@ function App() {
                                 )}
 
                                 {/* Delete remains available for active and sold listings. */}
-                                <button
-                                  onClick={() =>
-                                    handleDeleteListing(item.id)
-                                  }
-                                  className="delete-btn"
-                                >
-                                  Delete
-                                </button>
+                                {!isRemoved && (
+                                  <button
+                                    onClick={() => handleDeleteListing(item.id)}
+                                    className="delete-btn"
+                                  >
+                                    Delete
+                                  </button>
+                                )}
                               </>
                             )}
                           </div>
